@@ -1,0 +1,8 @@
+{
+  "name": "research-compute",
+  "version": "0.1.0",
+  "description": "Optional add-on to research-integrity: compute nodes (this machine, SSH, Slurm) and instruments launched on them, every launch recorded in the research ledger before it starts.",
+  "author": { "name": "daniel-debrun" },
+  "license": "Apache-2.0",
+  "keywords": ["research", "compute", "slurm", "ssh", "gpu", "provenance"]
+}

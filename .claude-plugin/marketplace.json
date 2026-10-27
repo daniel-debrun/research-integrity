@@ -9,6 +9,11 @@
       "name": "research-integrity",
       "source": "./",
       "description": "Quotes checked by code against the page they cite, and claims recorded only on checked quotes, in a hash-chained ledger anyone can verify."
+    },
+    {
+      "name": "research-compute",
+      "source": "./extras/compute",
+      "description": "Optional add-on to research-integrity: compute nodes (this machine, SSH, Slurm) and instruments launched on them, every launch recorded in the research ledger before it starts."
     }
   ]
 }

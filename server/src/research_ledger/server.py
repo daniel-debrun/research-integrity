@@ -12,6 +12,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
+from . import critique as cq
 from . import instruments as ins
 from .ledger import Ledger
 from .quotecheck import Refusal
@@ -19,7 +20,9 @@ from .quotecheck import Refusal
 INSTRUCTIONS = """A ledger of the sources and instruments this project relies on, the passages quoted from them and
 the claims made on those quotes. Record a document with add_source, read it with read_page, cite passages verbatim
 with the numbers they state, and claim only on citations. A number you measure comes from an instrument: register the
-program once, run it with run_instrument, and cite its output with cite_run. A refusal says what is wrong and what to do instead; do what it says rather
+program once, run it with run_instrument, and cite its output with cite_run. A draft is reviewed by recording it
+with record_draft and having a reviewer record a critique; you then check each finding yourself and answer it with
+answer_finding, with evidence you record for that check, before a revision is recorded. A refusal says what is wrong and what to do instead; do what it says rather
 than rewording to get past it. Run verify before reporting."""
 
 
@@ -30,9 +33,13 @@ def _safe(fn) -> dict:
         return r.envelope()
 
 
+_FIELDS = ("seq", "id", "kind", "at", "body", "prev", "hash")
+
+
 def _entry(e: dict) -> dict:
+    """An entry as a tool answers it: its id, kind and time, its body, and what the call added (`already`, ...)."""
     return {"ok": True, "id": e["id"], "kind": e["kind"], "at": e["at"], **e["body"],
-            **({"already": True} if e.get("already") else {})}
+            **{k: v for k, v in e.items() if k not in _FIELDS}}
 
 
 def build(root: str | os.PathLike | None = None) -> MCPServer:
@@ -54,7 +61,7 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
 
     @server.tool(annotations=reads("Read a page"))
     def read_page(source: str, page: int, layout: bool = False) -> dict:
-        """One page of a recorded source, as quotes are checked against it. `layout` keeps table rows whole (when
+        """One page of a recorded source (or a draft, as page 1), as quotes are checked against it. `layout` keeps table rows whole (when
         the PDF reader provides it); quote a table row from that form."""
         def go():
             forms = ledger.forms(source)
@@ -66,7 +73,8 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
 
     @server.tool(annotations=appends("Cite a passage"))
     def cite(source: str, page: int, quote: str, numbers: list[str | float] | None = None) -> dict:
-        """Record a verbatim quote from one page of a source, with every number it is cited for. Refused unless the
+        """Record a verbatim quote from one page of a source, or from a draft (page 1), with every number it is
+        cited for. Refused unless the
         quote is on that page (a refusal names the page it is on) and writes each number (0.50 matches 0.5, 1,234
         matches 1234). Never paraphrase or join passages from different places."""
         return _safe(lambda: _entry(ledger.cite(source, page, quote, numbers or [])))
@@ -122,10 +130,39 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         return _safe(lambda: _entry(ledger.cite_run(run, quote, numbers or [], file)))
 
     @server.tool(annotations=appends("Make a claim"))
-    def claim(text: str, citations: list[str]) -> dict:
-        """Record a statement resting on citations (their ids from cite or cite_run). Refused unless every number the statement
-        writes is written in a quote it cites."""
-        return _safe(lambda: _entry(ledger.claim(text, citations)))
+    def claim(text: str, citations: list[str], supersedes: str = "") -> dict:
+        """Record a statement resting on citations (their ids from cite or cite_run). Refused unless every number
+        the statement writes is written in a quote it cites. `supersedes` replaces an earlier claim; refused while a
+        blocking finding on it is unanswered."""
+        return _safe(lambda: _entry(ledger.claim(text, citations, supersedes)))
+
+    @server.tool(annotations=appends("Record a draft", idempotent_hint=True))
+    def record_draft(path: str, supersedes: str = "") -> dict:
+        """Record a text file (an issue, a report, a plan, a paper) as a draft version, so a critique can target
+        exactly that text. `supersedes` makes it the revision of an earlier version, refused until every blocking
+        finding on that version is answered. Lists the numbers in it that no citation's quote writes."""
+        return _safe(lambda: _entry(cq.record_draft(ledger, path, supersedes)))
+
+    @server.tool(annotations=appends("Record a critique"))
+    def record_critique(target: str, findings: list[dict], persona: str = "") -> dict:
+        """Record a reviewer's findings on a draft, claim, run or citation (its id). Each finding is {"text": what
+        is wrong, "where": the line, quote or id it applies to, "blocking": true if it would change the conclusion
+        or the plan, "evidence": ids of citations or runs you recorded that show it}. A finding with no evidence is
+        marked unsupported. Findings are answered by the work's owner, not by the reviewer."""
+        return _safe(lambda: _entry(cq.critique(ledger, target, findings, persona)))
+
+    @server.tool(annotations=appends("Answer a finding"))
+    def answer_finding(critique: str, finding: str, verdict: str, reason: str = "",
+                       evidence: list[str] | None = None) -> dict:
+        """Answer one finding of a critique (F1, F2, ...): `upheld` or `dismissed`. A blocking finding needs
+        evidence either way, ids of citations or runs recorded after the critique: check it yourself, record that
+        check, and cite it. A dismissal needs a reason."""
+        return _safe(lambda: _entry(cq.answer(ledger, critique, finding, verdict, reason, evidence or [])))
+
+    @server.tool(annotations=reads("List findings"))
+    def list_findings(target: str = "", open_only: bool = False) -> dict:
+        """Critiques' findings with their status (open, upheld, dismissed): on one target, or all."""
+        return _safe(lambda: {"ok": True, "findings": cq.listing(ledger, target, open_only)})
 
     @server.tool(annotations=reads("Verify the ledger"))
     def verify() -> dict:
@@ -137,7 +174,8 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
 
     @server.tool(annotations=reads("List the ledger"))
     def list_entries(kind: str = "") -> dict:
-        """The ledger's entries, oldest first (or one kind: source, instrument, run, citation, claim)."""
+        """The ledger's entries, oldest first, or one kind: source, instrument, run, citation, claim, draft,
+        critique, answer, node, launch."""
         rows = [_entry(e) for e in ledger.entries() if not kind or e["kind"] == kind]
         return {"ok": True, "ledger": str(ledger.root), "entries": rows}
 

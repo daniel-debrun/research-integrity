@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "research-compute": {
+      "command": "uv",
+      "args": ["run", "--locked", "--quiet", "--project", "${CLAUDE_PLUGIN_ROOT}/server", "research-compute"]
+    }
+  }
+}

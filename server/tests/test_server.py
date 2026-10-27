@@ -1,13 +1,20 @@
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 from mcp.client.client import Client
 
+from research_ledger import compute_server
 from research_ledger.server import build
 
 TOOLS = {"add_source", "read_page", "cite", "claim", "verify", "list_entries", "register_instrument",
-         "run_instrument", "run_acting_instrument", "cite_run"}
+         "run_instrument", "run_acting_instrument", "cite_run", "record_draft", "record_critique", "answer_finding",
+         "list_findings"}
+COMPUTE = {"list_nodes", "register_node", "register_instrument_on", "launch_instrument", "wait_run", "run_logs",
+           "stop_run", "runs_in_flight"}
+ROOT = Path(__file__).resolve().parents[2]
+PREFIX = "mcp__plugin_research-integrity_research-ledger__"
 
 
 def run(server, calls):
@@ -28,7 +35,8 @@ def test_every_tool_is_annotated_for_the_directory(tmp_path):
     for t in tools:
         assert t.annotations.title and t.annotations.read_only_hint is not None, t.name
         assert t.annotations.read_only_hint or t.annotations.destructive_hint is not None, t.name
-    assert {t.name for t in tools if t.annotations.idempotent_hint} == {"add_source", "register_instrument"}
+    assert {t.name for t in tools if t.annotations.idempotent_hint} == {"add_source", "register_instrument",
+                                                                          "record_draft"}
     assert {t.name for t in tools if t.annotations.destructive_hint} == {"run_acting_instrument"}
 
 
@@ -60,3 +68,27 @@ def test_an_instrument_is_registered_run_and_cited_over_mcp(tmp_path):
     _, (good,) = run(server, [("cite_run", {"run": r["id"], "quote": "mean skill 0.71 at 12 stations",
                                             "numbers": ["0.71"]})])
     assert good["ok"] and good["run"] == r["id"]
+
+
+def test_the_compute_server_is_annotated_and_only_stop_is_destructive(tmp_path):
+    tools, _ = run(compute_server.build(tmp_path / ".ledger"), [])
+    assert {t.name for t in tools} == COMPUTE
+    assert all(t.annotations.title and t.annotations.open_world_hint for t in tools)
+    assert {t.name for t in tools if t.annotations.destructive_hint} == {"stop_run"}
+
+
+def agent_tools(name):
+    head = (ROOT / "agents" / f"{name}.md").read_text().split("---")[1]
+    line = next(l for l in head.splitlines() if l.startswith("tools:"))
+    return {t.strip() for t in line[len("tools:"):].split(",")}
+
+
+def test_personas_name_real_tools_and_reviewers_cannot_settle_or_edit():
+    for name in ("adversary", "reviewer", "scout", "replicator", "experimenter"):
+        ledger_tools = {t[len(PREFIX):] for t in agent_tools(name) if t.startswith(PREFIX)}
+        assert ledger_tools and ledger_tools <= TOOLS, name
+        assert "answer_finding" not in ledger_tools and "run_acting_instrument" not in ledger_tools, name
+    for name in ("adversary", "reviewer"):
+        tools = agent_tools(name)
+        assert not tools & {"Write", "Edit", "Bash", PREFIX + "record_draft", PREFIX + "claim"}, name
+        assert PREFIX + "record_critique" in tools, name

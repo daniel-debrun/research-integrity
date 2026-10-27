@@ -1,7 +1,7 @@
 {
   "name": "research-integrity",
   "version": "0.1.0",
-  "description": "Quotes checked by code against the page they cite, and claims recorded only on checked quotes, in a hash-chained ledger anyone can verify.",
+  "description": "Quotes checked by code against the page they cite, measurements recorded with the exact code that made them, and reviews whose every finding is checked and answered, in a hash-chained ledger anyone can verify.",
   "author": { "name": "daniel-debrun" },
   "license": "Apache-2.0",
   "keywords": ["research", "citations", "provenance", "verification", "literature-review"]

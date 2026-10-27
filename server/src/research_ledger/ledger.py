@@ -10,7 +10,11 @@ Kinds:
 - instrument, run: a program recorded by its exact code and environment, and one run of it (see instruments.py).
 - citation: a verbatim quote on one page of a source, or in a run's output, and the numbers it is cited for, each
   written in the quote.
-- claim: a statement resting on citations; every number the statement writes is written in a quote it cites.
+- claim: a statement resting on citations; every number the statement writes is written in a quote it cites. A
+  claim may supersede an earlier one.
+- draft, critique, answer: a document's versions, a reviewer's findings on them (or on a claim, run or citation), and
+  the answer to each finding (see critique.py).
+- node, launch: a compute node's fingerprint, and a run started on one, recorded before it starts (research-compute).
 
 `work/` (snapshot copies and run folders) and `.lock` are not part of the record; the ledger's .gitignore says so.
 """
@@ -24,6 +28,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import critique as cq
 from . import instruments as ins
 from . import quotecheck as qc
 from .quotecheck import Refusal
@@ -75,7 +80,14 @@ class Ledger:
         return (self.blobs / sha).read_bytes()
 
     def forms(self, source_id: str) -> list:
-        return json.loads(self.blob(self.get(source_id, "source")["body"]["pages"]))
+        """A source's page texts, or a draft's text as its one page."""
+        e = self.get(source_id)
+        if e["kind"] == "draft":
+            return [[self.blob(e["body"]["text"]).decode("utf-8")]]
+        if e["kind"] != "source":
+            raise Refusal(f"`{source_id}` is a {e['kind']}, not a source or draft", "a quote comes from a page of a "
+                          "source or from a draft", "cite_run quotes a run's output")
+        return json.loads(self.blob(e["body"]["pages"]))
 
     # --- writing --------------------------------------------------------------------------------------------------
     def _put_blob(self, data: bytes) -> str:
@@ -120,6 +132,12 @@ class Ledger:
                 raise Refusal(f"could not fetch {origin}", str(e)[:200], "check the URL, or download it and give the file")
         else:
             path = Path(origin).expanduser()
+            draft = next((e for e in reversed(self.entries()) if e["kind"] == "draft"
+                          and Path(e["body"]["path"]).expanduser().resolve() == path.resolve()), None)
+            if draft:
+                raise Refusal(f"{origin} is recorded as the draft {draft['id']}", "a draft's text is in the ledger "
+                              "already, at the exact version a critique targets; as a source it would go stale when "
+                              "the draft is revised", f"quote it with cite(source=\"{draft['id']}\", page=1)")
             if not path.is_file():
                 raise Refusal(f"no file at {origin}", "a source is a local file or an http(s) URL",
                               "give the document's path or URL")
@@ -138,7 +156,7 @@ class Ledger:
 
     def cite(self, source: str, page: int, quote: str, cited_numbers=()) -> dict:
         """Record a quote on one page of a source, refused unless it is on that page and writes every number."""
-        src = self.get(source, "source")
+        src = self.get(source)
         out = qc.check(self.forms(source), page, quote, cited_numbers)
         body = {"source": src["id"], "page": page, "quote": quote, "numbers": out["numbers"]}
         return self._append("citation", body)
@@ -150,9 +168,9 @@ class Ledger:
         out = qc.check([[ins.output_text(self, r, file)]], 1, quote, cited_numbers)
         return self._append("citation", {"run": r["id"], "file": file, "quote": quote, "numbers": out["numbers"]})
 
-    def claim(self, text: str, citations: list) -> dict:
+    def claim(self, text: str, citations: list, supersedes: str = "") -> dict:
         """Record a statement resting on citations, refused unless every number it writes is written in a quote
-        it cites."""
+        it cites. `supersedes` replaces an earlier claim, refused while a blocking finding on it is unanswered."""
         if not text.strip():
             raise Refusal("a claim needs its statement")
         if not citations:
@@ -165,7 +183,12 @@ class Ledger:
             raise Refusal(f"{loose[0]} is not written in any quote the claim cites",
                           "every number a claim writes is one its quotes write",
                           "cite the passage that states it, write it as the quote does, or drop it from the claim")
-        return self._append("claim", {"text": text, "citations": [c["id"] for c in cited]})
+        body = {"text": text, "citations": [c["id"] for c in cited]}
+        if supersedes:
+            old = self.get(supersedes, "claim")
+            cq.gate(self.entries(), old["id"])
+            body["supersedes"] = old["id"]
+        return self._append("claim", body)
 
     # --- checking -------------------------------------------------------------------------------------------------
     def document(self, origin: str) -> bytes | None:
@@ -209,15 +232,17 @@ class Ledger:
                         raise Refusal("its file has changed since it was recorded", b["origin"])
                     else:
                         fresh[e["id"]] = qc.forms_of(data, b["origin"])
-                elif e["kind"] in ("instrument", "run"):
+                elif e["kind"] in ("instrument", "run", "node", "launch"):
                     ins.verify_entry(self, e, seen)
+                elif e["kind"] in ("draft", "critique", "answer"):
+                    cq.verify_entry(self, e, seen)
                 elif e["kind"] == "citation" and "run" in b:
                     if seen.get(b["run"], {}).get("kind") != "run":
                         raise Refusal(f"cites {b['run']}, which is not an earlier run")
                     qc.check([[ins.output_text(self, seen[b["run"]], b["file"])]], 1, b["quote"], b["numbers"])
                 elif e["kind"] == "citation":
-                    if seen.get(b["source"], {}).get("kind") != "source":
-                        raise Refusal(f"cites {b['source']}, which is not an earlier source")
+                    if seen.get(b["source"], {}).get("kind") not in ("source", "draft"):
+                        raise Refusal(f"cites {b['source']}, which is not an earlier source or draft")
                     qc.check(self.forms(b["source"]), b["page"], b["quote"], b["numbers"])
                     if b["source"] in fresh:
                         try:
@@ -230,11 +255,19 @@ class Ledger:
                     written = set().union(*(qc.numbers(seen[c]["body"]["quote"]) for c in b["citations"]))
                     if qc.numbers(b["text"]) - written:
                         raise Refusal("writes a number none of its quotes write")
+                    if b.get("supersedes") and seen.get(b["supersedes"], {}).get("kind") != "claim":
+                        raise Refusal(f"supersedes {b['supersedes']}, which is not an earlier claim")
             except Refusal as r:
                 problems.append(f"{where}: {r.error}" + (f" ({r.meaning})" if r.meaning else ""))
             except FileNotFoundError:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
-        counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in ("source", "instrument", "run", "citation", "claim")}
+        kinds = ("source", "instrument", "run", "citation", "claim", "draft", "critique", "answer", "node", "launch")
+        counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
+        review = cq.summary(list(seen.values()))
+        problems += review["problems"]
+        ran = {v["body"].get("launch") for v in seen.values() if v["kind"] == "run"}
+        open_launches = [v["id"] for v in seen.values() if v["kind"] == "launch" and v["id"] not in ran]
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
-                "problems": problems, "unread": unread}
+                "problems": problems, "unread": unread, "open_findings": review["open_findings"],
+                "open_launches": open_launches, "personas": review["personas"]}

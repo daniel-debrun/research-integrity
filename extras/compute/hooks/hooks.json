@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --locked --quiet --project \"${CLAUDE_PLUGIN_ROOT}/server\" research-compute --status",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

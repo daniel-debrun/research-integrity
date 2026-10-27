@@ -10,6 +10,11 @@ as an instrument, one exact version of its code and environment, and every run o
 into a hash-chained ledger in the project (`.ledger/`) that anyone can recheck. The checks are code, not a
 reviewer's judgement: a refusal says what is wrong, what it means and what to do instead.
 
+Reviews are recorded too. A draft is recorded at an exact version, a reviewer persona records its findings with its
+own evidence, and the session that owns the work checks and answers every finding with evidence of its own before a
+revision can be recorded. When a critique changes the direction of a plan, a result or a draft, the ledger shows why,
+and shows that each point was checked rather than taken on the reviewer's word.
+
 Sealed plans, counted trials and a holdout come next.
 
 ## What is in it
@@ -18,7 +23,11 @@ Sealed plans, counted trials and a holdout come next.
 |---|---|---|
 | `skills/citation-check/` | The method: read, quote verbatim, cite with numbers, claim on citations, verify. Ships `scripts/quotecheck.py`, the same check as the server, standard library only. | Any Agent Skills client: Claude Code, Claude Science, Cowork, Codex and others |
 | `server/` (`research-ledger`) | An MCP server (stdio) over the ledger: `add_source`, `read_page`, `cite`, `claim`, `verify`, `list_entries`, and for instruments `register_instrument`, `run_instrument`, `run_acting_instrument`, `cite_run`. Every tool is annotated; only `run_acting_instrument` is destructive. | Any MCP client that runs a local command |
-| `.claude-plugin/`, `.mcp.json` | The plugin and its own marketplace: installing the plugin installs both of the above. | Claude Code |
+| `skills/critique/` | How a review is recorded and answered, and how to report it: each finding with what you found when you checked. | Any Agent Skills client |
+| `agents/` | Five personas: `adversary` and `reviewer` (record critiques; can't edit, run shells or answer findings), `scout` (finds and cites sources), `replicator` (re-derives a number with its own code), `experimenter` (runs the planned measurements). | Claude Code |
+| `commands/adversary-review.md` | `/research-integrity:adversary-review <draft> [files]`: records the draft, hands it to the adversary without your reasoning, then has you check and answer every finding. | Claude Code |
+| `.claude-plugin/`, `.mcp.json` | The plugin and its own marketplace: installing the plugin installs all of the above. | Claude Code |
+| `extras/compute/` | **Optional** second plugin, `research-compute`: compute nodes (this machine, SSH, Slurm) and instruments launched on them. See its [README](extras/compute/README.md). | Claude Code, or any MCP client |
 
 ## Install
 
@@ -33,6 +42,12 @@ claude plugin install research-integrity@research-integrity
 ```
 
 Or for one session from a checkout: `claude --plugin-dir /path/to/research-integrity`.
+
+The optional compute add-on is listed in the same marketplace:
+
+```bash
+claude plugin install research-compute@research-integrity
+```
 
 Other clients:
 
@@ -75,6 +90,23 @@ before each of its runs. `run_instrument` refuses it.
 `verify` checks each instrument's code and each run's stored output against their hashes, and each citation of a run
 against the stored output. It does not run anything again.
 
+## Reviews
+
+`record_draft` records a text file (an issue, a report, a plan, a paper) at its exact text, and lists the numbers in
+it that no citation's quote writes. `record_critique` records a reviewer's findings on a draft, claim, run or
+citation. Each finding says what is wrong and where, and whether it is blocking (it would change the conclusion or
+the plan). It names the citations or runs the reviewer recorded as evidence; a finding with none is marked
+unsupported.
+
+`answer_finding` answers one finding, upheld or dismissed. A blocking finding can only be answered with evidence
+recorded after the critique: a check the owner made in response to it, whichever way it goes. A reviewer's number
+is a claim like any other, and reviewers are wrong too. A dismissal needs a reason.
+
+`record_draft(path, supersedes=...)` and `claim(..., supersedes=...)` record a revision. Either is refused while a
+blocking finding on the version it replaces is unanswered. `verify` reports an upheld finding whose draft or claim
+was never revised, and a claim still resting on a run or citation that a finding was upheld against. It lists the
+blocking findings still open, and each persona's record: findings upheld, dismissed and open.
+
 Entries are not signed, and nothing here asks you to approve anything: when to ask you is left to the agent's own
 mode (in auto mode, nothing is asked). The chain shows that the ledger was changed after the fact. To fix its state
 at a point in time, commit `.ledger/` with the work it backs.
@@ -95,12 +127,18 @@ at a point in time, commit `.ledger/` with the work it backs.
   on it, but nothing stops it happening.
 - **An environment changed in place.** A Python package edited without changing its version is not seen as a change.
   The program's own file and the code snapshot are hashed byte for byte.
+- **Who answers a finding.** Only Claude Code enforces that a persona can't answer findings or edit the work,
+  through each subagent's tool list. Elsewhere the ledger can't tell the reviewer from the owner, and the critique
+  skill asks for a separate pass.
+- **Whether a check really checks.** An answer needs evidence recorded after the critique. Code can't tell whether
+  that evidence bears on the finding; the record makes it one step to look.
 - **What you record.** `add_source` takes any file, and its text is stored in `.ledger/blobs/`. Look before you
   commit `.ledger/`, and don't commit papers you may not redistribute.
 
 ## Data and network use
 
-- **Reads**: the files you pass to `add_source`, and the code folder you pass to `register_instrument`.
+- **Reads**: the files you pass to `add_source` and `record_draft`, and the code folder you pass to
+  `register_instrument`.
 - **Writes**: only inside the ledger folder (`./.ledger`, or `$LEDGER_DIR`).
 - **Runs**: the instruments you register, when a run tool is called. They do whatever their code does, including
   network access; the server adds none of its own.

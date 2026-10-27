@@ -98,21 +98,42 @@ def _interpreter(script: Path) -> str | None:
     return words[1] if Path(words[0]).name == "env" and len(words) > 1 else words[0]
 
 
-def fingerprint(program: str) -> list:
+class Local:
+    """Where an instrument is fingerprinted and run: this machine. A compute node (research-compute) answers the same
+    four questions over SSH."""
+    name = "local"
+
+    def which(self, program: str):
+        return shutil.which(program)
+
+    def realpath(self, path: str) -> str:
+        return os.path.realpath(path)
+
+    def sha_file(self, path: str) -> str:
+        return _sha(Path(path).read_bytes())
+
+    def python_listing(self, path: str) -> str:
+        try:
+            return subprocess.run([path, "-c", _LIST_PYTHON], capture_output=True, text=True, timeout=60).stdout
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise Refusal(f"could not list what `{path}` has installed", str(e)[:200])
+
+
+LOCAL = Local()
+
+
+def fingerprint(program: str, where=LOCAL) -> list:
     """What a program runs as: its resolved path and its file's sha256, and for Python its version and installed
     distributions. Each part has a kind, the program as written, and a sha; a Python listing keeps its text too."""
-    path = shutil.which(program)
+    path = where.which(program)
     if not path:
-        raise Refusal(f"`{program}` is not found", "the program a command starts must be installed where the server "
-                      "runs", "give its full path, or install it")
-    parts = [{"kind": "executable", "label": program, "path": os.path.realpath(path),
-              "sha": _sha(Path(path).read_bytes())}]
+        raise Refusal(f"`{program}` is not found" + ("" if where is LOCAL else f" on {where.name}"),
+                      "the program a command starts must be installed where it runs",
+                      "give its full path, or install it")
+    parts = [{"kind": "executable", "label": program, "path": where.realpath(path), "sha": where.sha_file(path)}]
     if Path(path).name.lower().startswith("python"):
-        try:
-            out = subprocess.run([path, "-c", _LIST_PYTHON], capture_output=True, text=True, timeout=60)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            raise Refusal(f"could not list what `{program}` has installed", str(e)[:200])
-        parts.append({"kind": "python", "label": program, "text": out.stdout, "sha": _sha(out.stdout.encode())})
+        text = where.python_listing(path)
+        parts.append({"kind": "python", "label": program, "text": text, "sha": _sha(text.encode())})
     return parts
 
 
@@ -136,8 +157,9 @@ def _changes(old: dict, new: dict, old_text: str) -> list:
 
 # --- registering ----------------------------------------------------------------------------------------------------
 def register(led, name: str, command: str, source: str = "", secrets=(), outputs=(), timeout: int = 600,
-             acts: bool = False) -> dict:
-    """Record an instrument version. The same code in the same environment returns the version already there."""
+             acts: bool = False, where=LOCAL, node: dict | None = None) -> dict:
+    """Record an instrument version. The same code in the same environment returns the version already there.
+    `where` and `node` (a node entry) register it on a compute node: fingerprinted there, and bound to it."""
     if not NAME.fullmatch(name or ""):
         raise Refusal(f"`{name}` is not an instrument name", "lowercase letters, digits, '.', '_' and '-'",
                       "pick a short name such as `station-skill`")
@@ -175,7 +197,7 @@ def register(led, name: str, command: str, source: str = "", secrets=(), outputs
     else:
         program = argv[0]
     env = []
-    for part in fingerprint(program) if program else []:
+    for part in fingerprint(program, where) if program else []:
         text = part.pop("text", None)
         if text is not None:
             part["sha"] = led._put_blob(text.encode())
@@ -183,6 +205,9 @@ def register(led, name: str, command: str, source: str = "", secrets=(), outputs
 
     manifest = {"name": name, "argv": argv, "files": files, "executable": sorted(executable), "env": env,
                 "secrets": sorted(set(secrets)), "outputs": list(outputs), "timeout": int(timeout), "acts": bool(acts)}
+    if node:
+        manifest["node"] = node["body"]["name"]
+        env.append({"kind": "node", "label": node["body"]["name"], "sha": node["body"]["version"]})
     version = _sha(_canonical(manifest))[:12]
     known = next((e for e in led.entries() if e["kind"] == "instrument" and e["body"]["name"] == name
                   and e["body"]["version"] == version), None)
@@ -205,13 +230,16 @@ def resolve(led, ref: str) -> dict:
                   "name the version you mean")
 
 
-def drift(led, inst: dict) -> list:
-    """What changed, in words, in what the instrument runs with since it was registered; empty when nothing did."""
+def drift(led, inst: dict, where=LOCAL) -> list:
+    """What changed, in words, in what the instrument runs with since it was registered; empty when nothing did.
+    A node's own fingerprint is research-compute's to check."""
     out, programs = [], {}
     for part in inst["body"]["env"]:
+        if part["kind"] == "node":
+            continue
         if part["label"] not in programs:
             try:
-                programs[part["label"]] = {p["kind"]: p for p in fingerprint(part["label"])}
+                programs[part["label"]] = {p["kind"]: p for p in fingerprint(part["label"], where)}
             except Refusal as r:
                 out.append(r.error)
                 programs[part["label"]] = {}
@@ -273,6 +301,9 @@ def run(led, ref: str, args=(), acting: bool = False) -> dict:
     inst = resolve(led, ref)
     b = inst["body"]
     label = f"{b['name']}@{b['version']}"
+    if b.get("node"):
+        raise Refusal(f"{label} is registered on the node {b['node']}", "it runs there, not here",
+                      "launch it with launch_instrument (research-compute)")
     if b["acts"] and not acting:
         raise Refusal(f"{label} acts on the outside world", "its runs go through run_acting_instrument, which hosts "
                       "that ask before such actions ask about", "call run_acting_instrument")
@@ -368,9 +399,20 @@ def verify_entry(led, e: dict, seen: dict) -> None:
         for rel, sha in b["files"].items():
             if _sha(led.blob(sha)) != sha:
                 raise Refusal(f"its code file {rel} was changed")
+    elif e["kind"] == "node":
+        if _sha(_canonical(b["fingerprint"]))[:12] != b["version"]:
+            raise Refusal("its version does not match its fingerprint")
+    elif e["kind"] == "launch":
+        if seen.get(b["instrument"], {}).get("kind") != "instrument":
+            raise Refusal(f"launches {b['instrument']}, which is not an earlier instrument")
     elif e["kind"] == "run":
         if seen.get(b["instrument"], {}).get("kind") != "instrument":
             raise Refusal(f"runs {b['instrument']}, which is not an earlier instrument")
+        if b.get("launch") and (seen.get(b["launch"], {}).get("kind") != "launch"
+                                or seen[b["launch"]]["body"]["instrument"] != b["instrument"]):
+            raise Refusal(f"records {b['launch']}, which is not an earlier launch of its instrument")
+        if b.get("launch") and any(v["kind"] == "run" and v["body"].get("launch") == b["launch"] for v in seen.values()):
+            raise Refusal(f"records {b['launch']} a second time")
         kept = [b["stdout"], b["stderr"]] + [o["sha"] for o in b["outputs"].values() if o["kept"]]
         if any(_sha(led.blob(sha)) != sha for sha in kept):
             raise Refusal("an output it recorded was changed")
