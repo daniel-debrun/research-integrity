@@ -1,0 +1,14 @@
+{
+  "name": "research-integrity",
+  "owner": {
+    "name": "daniel-debrun"
+  },
+  "description": "Research integrity for Claude: checked citations and a verifiable ledger.",
+  "plugins": [
+    {
+      "name": "research-integrity",
+      "source": "./",
+      "description": "Quotes checked by code against the page they cite, and claims recorded only on checked quotes, in a hash-chained ledger anyone can verify."
+    }
+  ]
+}
