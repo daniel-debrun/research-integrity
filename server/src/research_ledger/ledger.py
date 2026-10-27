@@ -7,8 +7,12 @@ against the stored pages and, where a source's file is still there, against the 
 
 Kinds:
 - source: a document as read (its bytes' sha256, its page texts as a blob).
-- citation: a verbatim quote on one page of a source, and the numbers it is cited for, each written in the quote.
+- instrument, run: a program recorded by its exact code and environment, and one run of it (see instruments.py).
+- citation: a verbatim quote on one page of a source, or in a run's output, and the numbers it is cited for, each
+  written in the quote.
 - claim: a statement resting on citations; every number the statement writes is written in a quote it cites.
+
+`work/` (snapshot copies and run folders) and `.lock` are not part of the record; the ledger's .gitignore says so.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import instruments as ins
 from . import quotecheck as qc
 from .quotecheck import Refusal
 
@@ -62,7 +67,7 @@ class Ledger:
         e = next((e for e in self.entries() if e["id"] == id), None)
         if e is None or (kind and e["kind"] != kind):
             what = f"a {kind}" if kind else "an entry"
-            raise Refusal(f"`{id}` is not {what} of the ledger", "ids are as add_source, cite and claim return them",
+            raise Refusal(f"`{id}` is not {what} of the ledger", "ids are as the tools that record entries return them",
                           "list the ledger's entries to find it")
         return e
 
@@ -86,6 +91,8 @@ class Ledger:
     def _append(self, kind: str, body: dict, check=lambda: None) -> dict:
         """Check and append one entry under an exclusive lock, so two writers never fork the chain."""
         self.root.mkdir(parents=True, exist_ok=True)
+        if not (self.root / ".gitignore").exists():
+            (self.root / ".gitignore").write_text(".lock\nwork/\n")
         with open(self.root / ".lock", "w") as lock:
             _lock(lock)
             check()
@@ -135,6 +142,13 @@ class Ledger:
         out = qc.check(self.forms(source), page, quote, cited_numbers)
         body = {"source": src["id"], "page": page, "quote": quote, "numbers": out["numbers"]}
         return self._append("citation", body)
+
+    def cite_run(self, run: str, quote: str, cited_numbers=(), file: str = "stdout") -> dict:
+        """Record a quote from a run's output (its stdout, its stderr or a text output), refused unless it is
+        there and writes every number."""
+        r = self.get(run, "run")
+        out = qc.check([[ins.output_text(self, r, file)]], 1, quote, cited_numbers)
+        return self._append("citation", {"run": r["id"], "file": file, "quote": quote, "numbers": out["numbers"]})
 
     def claim(self, text: str, citations: list) -> dict:
         """Record a statement resting on citations, refused unless every number it writes is written in a quote
@@ -195,6 +209,12 @@ class Ledger:
                         raise Refusal("its file has changed since it was recorded", b["origin"])
                     else:
                         fresh[e["id"]] = qc.forms_of(data, b["origin"])
+                elif e["kind"] in ("instrument", "run"):
+                    ins.verify_entry(self, e, seen)
+                elif e["kind"] == "citation" and "run" in b:
+                    if seen.get(b["run"], {}).get("kind") != "run":
+                        raise Refusal(f"cites {b['run']}, which is not an earlier run")
+                    qc.check([[ins.output_text(self, seen[b["run"]], b["file"])]], 1, b["quote"], b["numbers"])
                 elif e["kind"] == "citation":
                     if seen.get(b["source"], {}).get("kind") != "source":
                         raise Refusal(f"cites {b['source']}, which is not an earlier source")
@@ -215,6 +235,6 @@ class Ledger:
             except FileNotFoundError:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
-        counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in ("source", "citation", "claim")}
+        counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in ("source", "instrument", "run", "citation", "claim")}
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
                 "problems": problems, "unread": unread}

@@ -59,7 +59,9 @@ def as_number(v) -> Decimal:
     if isinstance(v, bool):
         raise Refusal(f"{v!r} is not a number")
     try:
-        return Decimal(repr(v) if isinstance(v, float) else str(v).replace(",", "").replace("−", "-").strip())
+        if isinstance(v, float):
+            return Decimal(int(v)) if v.is_integer() else Decimal(repr(v))
+        return Decimal(str(v).replace(",", "").replace("−", "-").strip())
     except InvalidOperation:
         raise Refusal(f"{v!r} is not a number", "a number the quote is cited for", "give it as the quote writes it")
 

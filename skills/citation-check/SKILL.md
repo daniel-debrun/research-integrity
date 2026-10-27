@@ -1,6 +1,6 @@
 ---
 name: citation-check
-description: Quote sources verbatim and have each quote checked against the page it cites before it backs a statement. Use whenever a statement in research, a literature review, a report or a paper rests on a document (a paper, a PDF, a report, a web page) and especially when it carries a number taken from one. Every quote is checked by code, not by judgement — it must be on the cited page and write every number it is cited for — and claims are recorded only on checked quotes.
+description: Quote sources verbatim and have each quote checked against the page it cites before it backs a statement. Use whenever a statement in research, a literature review, a report or a paper rests on a document (a paper, a PDF, a report, a web page) and especially when it carries a number taken from one or measured by a program. Every quote is checked by code, not by judgement — it must be on the cited page and write every number it is cited for — and claims are recorded only on checked quotes.
 license: Apache-2.0
 compatibility: The checks need Python 3.10+. PDFs need pdftotext (poppler) or the pypdf package. The ledger tools come from the research-ledger MCP server; without it, scripts/quotecheck.py runs the same check.
 ---
@@ -23,10 +23,25 @@ When the `research-ledger` tools are available, every check is recorded in the p
    take from this quote, written as the quote writes it. If you're unsure of the page, cite your best guess; a
    refusal names the page the quote is on.
 4. **Claim** with the statement and the citation ids it rests on. Every number the statement writes must be written
-   in one of those quotes. A number you computed (a difference, a ratio) is not quoted: say it in words, or leave it
-   out of the claim.
+   in one of those quotes. A number you computed (a difference, a ratio) is not quoted: compute it with an
+   instrument (below) and cite its output, say it in words, or leave it out of the claim.
 5. **Verify** before you report, and report its result. If it lists problems, fix them with new citations or say
    plainly that they remain.
+
+### Numbers you measure
+
+A number from a program (an analysis, a scraper, an API client) rests on that program's output, recorded the same way.
+
+1. **Register the program once** with `register_instrument`: a name, the command as you'd type it in its folder, the
+   folder as `source`, the environment variables it needs as `secrets` (names only), and the files it writes as
+   `outputs`. Set `acts` if it changes the outside world, such as placing an order or sending a message.
+2. **Run it** with `run_instrument`, or `run_acting_instrument` for one registered with `acts`. Every run is
+   recorded, failures included, so run it for the measurement you mean, not to try variations until one looks
+   right. If the code or what it runs with changed, the run is refused: register again, which makes a new version.
+3. **Cite its output** with `cite_run`: the run id, a verbatim line from `stdout` or a text output, and its numbers.
+   Then claim on that citation as on any other.
+
+Don't run the program directly for a number you'll report: a direct run isn't recorded, so no claim can rest on it.
 
 ## Without the tools
 

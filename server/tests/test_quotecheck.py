@@ -38,7 +38,7 @@ def test_a_paraphrase_is_refused():
 
 
 def test_a_number_not_written_in_the_quote_is_refused():
-    assert qc.check(FORMS, 1, "We calibrate ensemble forecasts at 1,234 stations", [1234])["ok"]
+    assert qc.check(FORMS, 1, "We calibrate ensemble forecasts at 1,234 stations", [1234.0])["numbers"] == ["1234"]
     r = refusal(qc.check, FORMS, 2, "Site calibration 0.70", ["0.63"])
     assert (r.error, r.meaning) == ("0.63 is not written in the quote", "the quote writes 0.70")
 
