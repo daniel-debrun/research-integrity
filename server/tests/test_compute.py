@@ -1,6 +1,8 @@
 """Light tests of research-compute: this machine as a node, and an `ssh` stand-in that runs scripts here. No network."""
 
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -87,7 +89,10 @@ def test_a_launch_counts_before_it_is_collected_and_can_be_stopped(led, tool, mo
     from research_ledger import compute_server
     assert r["launch"] in compute_server.status()
     s = cp.stop(led, r["launch"])
-    assert s["run"]["body"]["stopped"] and s["run"]["body"]["exit"] is None and cp.in_flight(led) == []
+    assert s["run"]["body"]["stopped"] and cp.in_flight(led) == []
+    time.sleep(0.5)
+    left = subprocess.run(["pgrep", "-f", r["launch"].split(":")[1]], capture_output=True, text=True).stdout
+    assert left == "", f"processes left running after stop: {left}"
 
 
 def test_a_launch_over_ssh(led, tool, fake_ssh, tmp_path):

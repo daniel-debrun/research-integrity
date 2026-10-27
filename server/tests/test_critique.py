@@ -140,3 +140,15 @@ def test_a_draft_is_quoted_by_its_id_and_its_file_is_not_a_source(led, work):
         led.add_source(str(work["draft"]))
     work["draft"].write_text(DRAFT.replace("384", "416"))
     assert led.verify()["ok"]
+
+
+def test_an_unchanged_revision_is_refused_and_draft_quotes_trace_nothing(led, work):
+    c, v1 = work["critique"]["id"], work["v1"]["id"]
+    led.cite(v1, 1, "The solver needs 2 to 3 iterations.")
+    mine = led.cite(work["log"]["id"], 1, "CPU runs: 416\nblow-ups: 6 of 40 runs", ["416"])
+    cq.answer(led, c, "F1", "upheld", "the log says 416", [mine["id"]])
+    cq.answer(led, c, "F2", "upheld", "checked", [mine["id"]])
+    with pytest.raises(Refusal, match="is unchanged since"):
+        cq.record_draft(led, str(work["draft"]), supersedes=v1)
+    work["draft"].write_text("The solver needs 2 to 3 iterations; the CPU made 416 runs.\n")
+    assert cq.record_draft(led, str(work["draft"]), supersedes=v1)["untraced_numbers"] == ["2", "3"]

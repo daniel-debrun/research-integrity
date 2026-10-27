@@ -76,13 +76,18 @@ def record_draft(led, path: str, supersedes: str = "") -> dict:
     entries = led.entries()
     known = next((e for e in entries if e["kind"] == "draft" and e["body"]["sha256"] == sha
                   and e["body"]["path"] == str(path)), None)
-    quoted = set().union(*(qc.numbers(e["body"]["quote"]) for e in entries if e["kind"] == "citation"))
+    drafts = {e["id"] for e in entries if e["kind"] == "draft"}
+    quoted = set().union(*(qc.numbers(e["body"]["quote"]) for e in entries
+                           if e["kind"] == "citation" and e["body"].get("source") not in drafts))
     untraced = sorted(qc.numbers(text) - quoted)
     if known and (not supersedes or known["body"]["supersedes"] == supersedes):
         return {**known, "already": True, "untraced_numbers": [str(n) for n in untraced]}
     old = None
     if supersedes:
         old = led.get(supersedes, "draft")
+        if old["body"]["sha256"] == sha:
+            raise Refusal(f"{path} is unchanged since {old['id']}", "a revision changes the text it replaces",
+                          "edit the file, then record it")
         gate(entries, old["id"])
     answered = sorted(ref for ref, x in _findings(entries).items()
                       if old and x["critique"]["body"]["target"] == old["id"] and x["answer"])

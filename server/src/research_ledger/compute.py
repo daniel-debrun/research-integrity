@@ -297,7 +297,9 @@ if [ -f secrets.env ]; then set -a; . ./secrets.env; set +a; rm -f secrets.env; 
 cd out
 TO=""
 if command -v timeout >/dev/null 2>&1; then TO="timeout {int(timeout)}"; fi
-env -i PATH="$PATH" HOME="$HOME" ${{LANG:+LANG="$LANG"}} {' '.join(env)} $TO {argv} > ../stdout 2> ../stderr
+env -i PATH="$PATH" HOME="$HOME" ${{LANG:+LANG="$LANG"}} {' '.join(env)} $TO {argv} > ../stdout 2> ../stderr &
+echo $! > ../child
+wait $!
 echo $? > ../exit.tmp
 cd ..
 date -u +%Y-%m-%dT%H:%M:%S+00:00 > ended
@@ -515,7 +517,10 @@ def stop(led, launch_id: str) -> dict:
     if st.get("job"):
         h.sh(f"scancel {q(st['job'])}")
     else:
-        h.sh(f"cd {q(st['dir'])} && p=$(cat pid 2>/dev/null) && {{ kill -TERM -- -$p 2>/dev/null || kill -TERM $p; }}")
+        # timeout(1) runs in a process group of its own, so the job's group and its runner's are both signalled
+        h.sh(f"cd {q(st['dir'])} && c=$(cat child 2>/dev/null); p=$(cat pid 2>/dev/null); "
+             f"[ -n \"$c\" ] && {{ kill -TERM -- -$c 2>/dev/null || kill -TERM $c; }}; "
+             f"[ -n \"$p\" ] && {{ kill -TERM -- -$p 2>/dev/null || kill -TERM $p; }}; true")
     for _ in range(10):
         if _status(led, launch_e) != "running":
             break
