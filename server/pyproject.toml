@@ -1,6 +1,6 @@
 [project]
 name = "research-ledger"
-version = "0.1.0"
+version = "0.1.1"
 description = "A hash-chained ledger of sources, checked citations and claims, served over MCP"
 readme = "README.md"
 license = "Apache-2.0"
