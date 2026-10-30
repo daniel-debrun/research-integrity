@@ -14,6 +14,7 @@ from mcp.types import ToolAnnotations
 
 from . import critique as cq
 from . import instruments as ins
+from . import plans as pl
 from .ledger import Ledger
 from .quotecheck import Refusal
 
@@ -22,7 +23,8 @@ the claims made on those quotes. Record a document with add_source, read it with
 with the numbers they state, and claim only on citations. A number you measure comes from an instrument: register the
 program once, run it with run_instrument, and cite its output with cite_run. A draft is reviewed by recording it
 with record_draft and having a reviewer record a critique; you then check each finding yourself and answer it with
-answer_finding, with evidence you record for that check, before a revision is recorded. A refusal says what is wrong and what to do instead; do what it says rather
+answer_finding, with evidence you record for that check, before a revision is recorded. Before testing anything,
+seal a plan with seal_plan and tag every run with its plan and hypothesis, so every trial counts. A refusal says what is wrong and what to do instead; do what it says rather
 than rewording to get past it. Run verify before reporting."""
 
 
@@ -44,7 +46,7 @@ def _entry(e: dict) -> dict:
 
 def build(root: str | os.PathLike | None = None) -> MCPServer:
     ledger = Ledger(root or os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")
-    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.1.1")
+    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.1.2")
 
     def reads(title):
         return ToolAnnotations(title=title, read_only_hint=True)
@@ -98,30 +100,65 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
                     **({"already": True} if e.get("already") else {})}
         return _safe(go)
 
-    def _run(ref, args, acting):
+    def _run(ref, args, acting, plan="", hypothesis="", look=""):
         def go():
-            e = ins.run(ledger, ref, args or [], acting)
+            e = ins.run(ledger, ref, args or [], acting, pl.tag(ledger, plan, hypothesis, look))
             b = e["body"]
             return {"ok": True, "id": e["id"], "ref": b["ref"], "exit": b["exit"], "timed_out": b["timed_out"],
+                    **{k: b[k] for k in pl.TAGS if b.get(k)},
                     "stdout_tail": e["stdout_tail"], "stderr_tail": e["stderr_tail"],
                     "outputs": {k: {**{f: o[f] for f in ("bytes", "kept")}, **({"text": e["shown"][k]}
                                 if k in e["shown"] else {})} for k, o in b["outputs"].items()}}
         return _safe(go)
 
     @server.tool(annotations=appends("Run an instrument", open_world_hint=True))
-    def run_instrument(ref: str, args: list[str] | None = None) -> dict:
+    def run_instrument(ref: str, args: list[str] | None = None, plan: str = "", hypothesis: str = "",
+                       look: str = "") -> dict:
         """Run a registered instrument (name@version) on `args` and record the run, failed or not. It runs a
         read-only copy of the registered code, never the live folder, and is refused, with nothing run, if what it
-        runs with has changed since it was registered. Returns the exit code, the output tails and small text
-        outputs in full; cite a figure from them with cite_run."""
-        return _run(ref, args, False)
+        runs with has changed since it was registered. `plan` and `hypothesis` tag it as a trial of that hypothesis
+        (at start, never later); `look` spends a holdout look from look_holdout. Returns the exit code, the output
+        tails and small text outputs in full; cite a figure from them with cite_run."""
+        return _run(ref, args, False, plan, hypothesis, look)
 
     @server.tool(annotations=ToolAnnotations(title="Run an instrument that acts", read_only_hint=False,
                                              destructive_hint=True, open_world_hint=True))
-    def run_acting_instrument(ref: str, args: list[str] | None = None) -> dict:
+    def run_acting_instrument(ref: str, args: list[str] | None = None, plan: str = "", hypothesis: str = "",
+                              look: str = "") -> dict:
         """Run a registered instrument that acts on the outside world (registered with acts), as run_instrument
         does."""
-        return _run(ref, args, True)
+        return _run(ref, args, True, plan, hypothesis, look)
+
+    @server.tool(annotations=appends("Seal a plan"))
+    def seal_plan(name: str, question: str, hypotheses: list[dict], holdout: list[str] | None = None) -> dict:
+        """Record what a study will test before the runs it governs: the question, and hypotheses, each
+        {"statement": what it claims, "metric": what is measured, "success": what counts as a result, "comparison":
+        against what (optional)}, numbered H1, H2, ... `holdout` lists files the work must not look at until a
+        look_holdout; they are recorded by sha256. A sealed plan changes only by amend_plan."""
+        return _safe(lambda: _entry(pl.seal(ledger, name, question, hypotheses, holdout or [])))
+
+    @server.tool(annotations=appends("Amend a plan"))
+    def amend_plan(name: str, reason: str, question: str = "", hypotheses: list[dict] | None = None,
+                   holdout: list[str] | None = None, because: list[str] | None = None) -> dict:
+        """Record a plan's next version: what changes (a new question, the full new list of hypotheses, keeping
+        an existing hypothesis's id to keep its trials, or a new holdout), why, and what prompted it (`because`:
+        finding refs, run or citation ids). Refused while a blocking finding on the current version is
+        unanswered."""
+        return _safe(lambda: _entry(pl.amend(ledger, name, reason, question, hypotheses, holdout, because or [])))
+
+    @server.tool(annotations=reads("Plan status"))
+    def plan_status(name: str) -> dict:
+        """A plan's trials: for each hypothesis, every run tagged to it (succeeded, failed, still running), how
+        many a claim reports, and the successful ones nothing reports; untagged runs of the same instruments since
+        the seal; its amendments and its holdout looks."""
+        return _safe(lambda: {"ok": True, **pl.status(ledger.entries(), name)})
+
+    @server.tool(annotations=ToolAnnotations(title="Look at a holdout", read_only_hint=False, destructive_hint=True))
+    def look_holdout(plan: str, reason: str) -> dict:
+        """Spend one look at a plan's holdout, with the reason. Refused if a holdout file changed since the seal.
+        Pass the look's id to the one run that reads the holdout; a look whose run fails stays spent. Looks are
+        counted in plan_status."""
+        return _safe(lambda: _entry(pl.look(ledger, plan, reason)))
 
     @server.tool(annotations=appends("Cite a run's output"))
     def cite_run(run: str, quote: str, numbers: list[str | float] | None = None, file: str = "stdout") -> dict:

@@ -15,7 +15,8 @@ own evidence, and the session that owns the work checks and answers every findin
 revision can be recorded. When a critique changes the direction of a plan, a result or a draft, the ledger shows why,
 and shows that each point was checked rather than taken on the reviewer's word.
 
-Sealed plans, counted trials and a holdout come next.
+Results are counted too. A plan is sealed before the runs it governs, every run is tagged with the hypothesis it
+tests, and a claim records how many trials stand behind it, so a best-of-forty can't pass as one experiment.
 
 ## What is in it
 
@@ -23,6 +24,7 @@ Sealed plans, counted trials and a holdout come next.
 |---|---|---|
 | `skills/citation-check/` | The method: read, quote verbatim, cite with numbers, claim on citations, verify. Ships `scripts/quotecheck.py`, the same check as the server, standard library only. | Any Agent Skills client: Claude Code, Claude Science, Cowork, Codex and others |
 | `server/` (`research-ledger`) | An MCP server (stdio) over the ledger: `add_source`, `read_page`, `cite`, `claim`, `verify`, `list_entries`, and for instruments `register_instrument`, `run_instrument`, `run_acting_instrument`, `cite_run`. Every tool is annotated; only `run_acting_instrument` is destructive. | Any MCP client that runs a local command |
+| `skills/plans/` | Decide before you look: seal the plan, tag every run, report the trial count, spend holdout looks deliberately. | Any Agent Skills client |
 | `skills/critique/` | How a review is recorded and answered, and how to report it: each finding with what you found when you checked. | Any Agent Skills client |
 | `agents/` | Five personas: `adversary` and `reviewer` (record critiques; can't edit, run shells or answer findings), `scout` (finds and cites sources), `replicator` (re-derives a number with its own code), `experimenter` (runs the planned measurements). | Claude Code |
 | `commands/adversary-review.md` | `/research-integrity:adversary-review <draft> [files]`: records the draft, hands it to the adversary without your reasoning, then has you check and answer every finding. | Claude Code |
@@ -90,6 +92,25 @@ before each of its runs. `run_instrument` refuses it.
 `verify` checks each instrument's code and each run's stored output against their hashes, and each citation of a run
 against the stored output. It does not run anything again.
 
+## Plans and trials
+
+`seal_plan` records a study's question and its hypotheses, each with what it claims, what is measured and what
+counts as a result, before any run that tests it. It can also name holdout files, recorded by sha256. A plan changes
+only through `amend_plan`, a new version with its reason and what prompted it. Like a draft's revision, an amendment
+is refused while a blocking finding on the plan is unanswered.
+
+`run_instrument` and research-compute's `launch_instrument` take `plan` and `hypothesis`. The tag is set when the run
+starts, never afterwards, so every attempt is a trial on the record, failures included. `plan_status` lists, for
+each hypothesis, the trials that succeeded, failed or are still running, how many a claim reports, and the
+successful runs nothing reports. It also lists runs of the same instruments made without a tag since the seal. A
+claim that rests on a tagged run records the count when it is made, for example 1 of 40 trials, and `verify`
+recomputes it.
+
+`look_holdout` spends one look at the holdout, with its reason. It is refused if a holdout file changed since the
+seal, and the look's id goes to the one run that reads the holdout. A look whose run fails stays spent. Looks are
+counted, not limited, and the tool is annotated destructive, so a client that asks before destructive actions asks
+before each look.
+
 ## Reviews
 
 `record_draft` records a text file (an issue, a report, a plan, a paper) at its exact text, and lists the numbers in
@@ -127,6 +148,11 @@ at a point in time, commit `.ledger/` with the work it backs.
   on it, but nothing stops it happening.
 - **An environment changed in place.** A Python package edited without changing its version is not seen as a change.
   The program's own file and the code snapshot are hashed byte for byte.
+- **Reading a holdout directly.** Nothing stops a program on this machine from opening a holdout file without a
+  look. The record shows which runs said they used one, and the custody design, labels kept on another node and
+  scored there, is not built yet.
+- **Runs without a tag.** A run that should count but carries no tag isn't a trial of the plan. `plan_status` lists
+  untagged runs of the plan's instruments since the seal, so they are visible, not hidden.
 - **Who answers a finding.** Only Claude Code enforces that a persona can't answer findings or edit the work,
   through each subagent's tool list. Elsewhere the ledger can't tell the reviewer from the owner, and the critique
   skill asks for a separate pass.

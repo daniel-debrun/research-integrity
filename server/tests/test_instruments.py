@@ -145,3 +145,13 @@ def test_a_snapshot_skips_environments_secrets_and_caches(tool):
     (tool / "__pycache__" / "m.pyc").write_bytes(b"x")
     (tool / "deploy.key").write_text("k")
     assert ins.collect(tool) == ["measure.py"]
+
+
+def test_the_work_folder_can_be_deleted_but_snapshot_files_cannot_be_edited(led, tool, secret):
+    import shutil
+    r = ins.run(led, register(led, tool)["body"]["name"])
+    snap = led.root / "work" / "snapshots" / r["body"]["ref"]
+    with pytest.raises(PermissionError):
+        (snap / "measure.py").write_text("print('edited')")
+    shutil.rmtree(led.root / "work")
+    assert not (led.root / "work").exists()

@@ -120,3 +120,12 @@ def test_gpus_are_picked_least_used_first_and_held_ones_skipped(led):
     assert cp._pick_gpus(led, h, "box", 2) == ["2", "1"]
     with pytest.raises(Refusal, match="3 GPUs not held by open launches; 4 asked for"):
         cp._pick_gpus(led, h, "box", 4)
+
+
+def test_a_launch_carries_its_plan_tags_into_its_run(led, tool):
+    from research_ledger import plans as pl
+    name = on(led, "local", tool)["body"]["name"]
+    pl.seal(led, "s", "q?", [{"statement": "it measures", "metric": "skill", "success": "above 0.5"}])
+    r = cp.launch(led, name, follow=30, tags=pl.tag(led, "s", "H1"))
+    assert r["run"]["body"]["plan"] and r["run"]["body"]["hypothesis"] == "H1"
+    assert pl.status(led.entries(), "s")["hypotheses"][0]["trials"] == 1 and led.verify()["ok"]

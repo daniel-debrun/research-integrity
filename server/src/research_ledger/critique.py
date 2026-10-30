@@ -26,7 +26,7 @@ from . import quotecheck as qc
 from .quotecheck import Refusal
 
 VERDICTS = ("upheld", "dismissed")
-TARGETS = ("draft", "claim", "run", "citation")
+TARGETS = ("draft", "claim", "run", "citation", "plan")
 EVIDENCE = ("citation", "run")
 
 
@@ -203,7 +203,7 @@ def verify_entry(led, e: dict, seen: dict) -> None:
 def summary(entries) -> dict:
     """After the walk: upheld findings left standing (problems), open blocking findings, each persona's record."""
     by_id = {e["id"]: e for e in entries}
-    superseded = {e["body"].get("supersedes") for e in entries if e["kind"] in ("draft", "claim")} - {"", None}
+    superseded = {e["body"].get("supersedes") for e in entries if e["kind"] in ("draft", "claim", "plan")} - {"", None}
     problems, open_, personas = [], [], {}
     for ref, x in _findings(entries).items():
         c, f, a = x["critique"], x["finding"], x["answer"]
@@ -214,7 +214,7 @@ def summary(entries) -> dict:
         if not a or a["body"]["verdict"] != "upheld":
             continue
         t = by_id.get(c["body"]["target"])
-        if t and t["kind"] in ("draft", "claim") and t["id"] not in superseded:
+        if t and t["kind"] in ("draft", "claim", "plan") and t["id"] not in superseded:
             problems.append(f"{ref} was upheld, and {t['id']} still stands (supersede it with a revision)")
         elif t and t["kind"] in ("run", "citation"):
             for cl in entries:

@@ -15,6 +15,8 @@ Kinds:
 - draft, critique, answer: a document's versions, a reviewer's findings on them (or on a claim, run or citation), and
   the answer to each finding (see critique.py).
 - node, launch: a compute node's fingerprint, and a run started on one, recorded before it starts (research-compute).
+- plan, look: what a study tests, sealed before the runs it governs, and one look at its holdout (see plans.py). A
+  run or launch tagged to a plan's hypothesis is one of its trials; a claim resting on one records the count.
 
 `work/` (snapshot copies and run folders) and `.lock` are not part of the record; the ledger's .gitignore says so.
 """
@@ -30,6 +32,7 @@ from pathlib import Path
 
 from . import critique as cq
 from . import instruments as ins
+from . import plans as pl
 from . import quotecheck as qc
 from .quotecheck import Refusal
 
@@ -184,6 +187,9 @@ class Ledger:
                           "every number a claim writes is one its quotes write",
                           "cite the passage that states it, write it as the quote does, or drop it from the claim")
         body = {"text": text, "citations": [c["id"] for c in cited]}
+        trials = pl.claim_trials(self.entries(), cited)
+        if trials:
+            body["trials"] = trials
         if supersedes:
             old = self.get(supersedes, "claim")
             cq.gate(self.entries(), old["id"])
@@ -234,6 +240,9 @@ class Ledger:
                         fresh[e["id"]] = qc.forms_of(data, b["origin"])
                 elif e["kind"] in ("instrument", "run", "node", "launch"):
                     ins.verify_entry(self, e, seen)
+                    pl.verify_entry(self, e, seen)
+                elif e["kind"] in ("plan", "look"):
+                    pl.verify_entry(self, e, seen)
                 elif e["kind"] in ("draft", "critique", "answer"):
                     cq.verify_entry(self, e, seen)
                 elif e["kind"] == "citation" and "run" in b:
@@ -257,12 +266,15 @@ class Ledger:
                         raise Refusal("writes a number none of its quotes write")
                     if b.get("supersedes") and seen.get(b["supersedes"], {}).get("kind") != "claim":
                         raise Refusal(f"supersedes {b['supersedes']}, which is not an earlier claim")
+                    if b.get("trials", []) != pl.claim_trials(list(seen.values()), [seen[c] for c in b["citations"]]):
+                        raise Refusal("its trial count is not what the record shows")
             except Refusal as r:
                 problems.append(f"{where}: {r.error}" + (f" ({r.meaning})" if r.meaning else ""))
             except FileNotFoundError:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
-        kinds = ("source", "instrument", "run", "citation", "claim", "draft", "critique", "answer", "node", "launch")
+        kinds = ("source", "instrument", "run", "citation", "claim", "draft", "critique", "answer", "node", "launch",
+                 "plan", "look")
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]
@@ -270,4 +282,8 @@ class Ledger:
         open_launches = [v["id"] for v in seen.values() if v["kind"] == "launch" and v["id"] not in ran]
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
                 "problems": problems, "unread": unread, "open_findings": review["open_findings"],
-                "open_launches": open_launches, "personas": review["personas"]}
+                "open_launches": open_launches, "personas": review["personas"],
+                "trials": [{"plan": n, "hypothesis": h["id"], **{k: h[k] for k in ("trials", "reported")},
+                            "dropped": len(h["dropped"])}
+                           for n in sorted({v["body"]["name"] for v in seen.values() if v["kind"] == "plan"})
+                           for h in pl.status(list(seen.values()), n)["hypotheses"]]}

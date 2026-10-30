@@ -10,7 +10,7 @@ from research_ledger.server import build
 
 TOOLS = {"add_source", "read_page", "cite", "claim", "verify", "list_entries", "register_instrument",
          "run_instrument", "run_acting_instrument", "cite_run", "record_draft", "record_critique", "answer_finding",
-         "list_findings"}
+         "list_findings", "seal_plan", "amend_plan", "plan_status", "look_holdout"}
 COMPUTE = {"list_nodes", "register_node", "register_instrument_on", "launch_instrument", "wait_run", "run_logs",
            "stop_run", "runs_in_flight"}
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +37,7 @@ def test_every_tool_is_annotated_for_the_directory(tmp_path):
         assert t.annotations.read_only_hint or t.annotations.destructive_hint is not None, t.name
     assert {t.name for t in tools if t.annotations.idempotent_hint} == {"add_source", "register_instrument",
                                                                           "record_draft"}
-    assert {t.name for t in tools if t.annotations.destructive_hint} == {"run_acting_instrument"}
+    assert {t.name for t in tools if t.annotations.destructive_hint} == {"run_acting_instrument", "look_holdout"}
 
 
 def test_a_refusal_comes_back_as_its_envelope_and_a_good_citation_is_recorded(tmp_path, paper):

@@ -15,6 +15,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from . import compute as cp
+from . import plans as pl
 from .ledger import Ledger
 from .server import _entry, _safe
 
@@ -41,7 +42,7 @@ def _run_view(r: dict) -> dict:
 
 def build(root=None) -> MCPServer:
     ledger = _ledger(root)
-    server = MCPServer("research-compute", instructions=INSTRUCTIONS, version="0.1.1")
+    server = MCPServer("research-compute", instructions=INSTRUCTIONS, version="0.1.2")
 
     def reads(title):
         return ToolAnnotations(title=title, read_only_hint=True, open_world_hint=True)
@@ -79,13 +80,15 @@ def build(root=None) -> MCPServer:
 
     @server.tool(annotations=appends("Launch an instrument"))
     def launch_instrument(ref: str, args: list[str] | None = None, gpus: int = 0, cores: int = 0,
-                          memory_gb: float = 0, minutes: int = 0, follow_seconds: int = 20) -> dict:
+                          memory_gb: float = 0, minutes: int = 0, follow_seconds: int = 20, plan: str = "",
+                          hypothesis: str = "", look: str = "") -> dict:
         """Start a node instrument (name@version) on `args`. The launch is recorded first, so it counts even if
         never collected. Checks that neither the node nor what the instrument runs with has changed, copies the
         code there, and starts it; on an SSH node `gpus` picks free GPUs (CUDA_VISIBLE_DEVICES), on Slurm the
-        resources go to sbatch. Follows it for `follow_seconds`; if it ends by then, its run is recorded."""
+        resources go to sbatch. Follows it for `follow_seconds`; if it ends by then, its run is recorded. `plan`
+        and `hypothesis` tag it as a trial (research-ledger's seal_plan); `look` spends a holdout look."""
         return _safe(lambda: _run_view(cp.launch(ledger, ref, args or [], gpus, cores, memory_gb, minutes,
-                                                 follow_seconds)))
+                                                 follow_seconds, pl.tag(ledger, plan, hypothesis, look))))
 
     @server.tool(annotations=appends("Wait for a launch"))
     def wait_run(launch: str, seconds: int = 60) -> dict:

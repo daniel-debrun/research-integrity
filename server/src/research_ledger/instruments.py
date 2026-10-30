@@ -255,8 +255,10 @@ def drift(led, inst: dict, where=LOCAL) -> list:
 
 # --- running --------------------------------------------------------------------------------------------------------
 def _readonly(root: Path) -> None:
-    for p in sorted(root.rglob("*"), reverse=True):
-        p.chmod(p.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+    """Make a snapshot's files read-only. Its folders stay writable, so the copy can still be deleted."""
+    for p in root.rglob("*"):
+        if p.is_file():
+            p.chmod(p.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
 
 
 def snapshot(led, inst: dict) -> Path:
@@ -295,9 +297,10 @@ def _tail(data: bytes) -> str:
     return "\n".join(lines)[-TAIL_BYTES:]
 
 
-def run(led, ref: str, args=(), acting: bool = False) -> dict:
+def run(led, ref: str, args=(), acting: bool = False, tags: dict | None = None) -> dict:
     """Run an instrument version on `args` and record the run, failed or not. Refused, with nothing run, when the
-    instrument is of the other kind, when what it runs with has changed, or when a secret it needs is not set."""
+    instrument is of the other kind, when what it runs with has changed, or when a secret it needs is not set.
+    `tags` (from plans.tag) mark the plan hypothesis it tests and the holdout look it spends."""
     inst = resolve(led, ref)
     b = inst["body"]
     label = f"{b['name']}@{b['version']}"
@@ -367,7 +370,7 @@ def run(led, ref: str, args=(), acting: bool = False) -> dict:
                 shown[rel] = text
     body = {"instrument": inst["id"], "ref": label, "args": list(args), "started": started, "ended": ended,
             "exit": code, "timed_out": timed_out, "stdout": led._put_blob(stdout), "stderr": led._put_blob(stderr),
-            "outputs": outputs}
+            "outputs": outputs, **(tags or {})}
     e = led._append("run", body)
     return {**e, "stdout_tail": _tail(stdout), "stderr_tail": _tail(stderr), "shown": shown}
 

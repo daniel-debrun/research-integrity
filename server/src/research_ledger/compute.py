@@ -332,7 +332,7 @@ def _state(led, launch: dict) -> dict:
 
 
 def launch(led, ref: str, args=(), gpus: int = 0, cores: int = 0, memory_gb: float = 0, minutes: int = 0,
-           follow: float = 20) -> dict:
+           follow: float = 20, tags: dict | None = None) -> dict:
     """Start a node instrument on `args`. The launch is recorded before the job starts; a launch that fails to start
     is recorded with a failed run."""
     inst = ins.resolve(led, ref)
@@ -357,7 +357,7 @@ def launch(led, ref: str, args=(), gpus: int = 0, cores: int = 0, memory_gb: flo
     e = led._append("launch", {"instrument": inst["id"], "ref": label, "node": b["node"], "node_version":
                                entry["body"]["version"], "backend": spec["backend"], "args": list(args),
                                "resources": {"gpus": gpus, "cores": cores, "memory_gb": memory_gb, "minutes": minutes},
-                               "gpu_ids": gpu_ids})
+                               "gpu_ids": gpu_ids, **(tags or {})})
     key = e["id"].split(":", 1)[1]
     try:
         rdir = f"{_workdir(led, spec, h)}/{key}"
@@ -431,6 +431,7 @@ def _record(led, launch_e, inst, end: dict, stdout: bytes, stderr: bytes, output
             "stderr": led._put_blob(ins._mask(stderr, values)), "outputs": outputs, "launch": launch_e["id"],
             "node": launch_e["body"]["node"]}
     body.update({k: end[k] for k in ("stopped", "lost", "error") if end.get(k)})
+    body.update({k: launch_e["body"][k] for k in ("plan", "hypothesis", "look") if launch_e["body"].get(k)})
     return led._append("run", body)
 
 
