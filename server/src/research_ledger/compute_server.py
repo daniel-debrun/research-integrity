@@ -42,7 +42,7 @@ def _run_view(r: dict) -> dict:
 
 def build(root=None) -> MCPServer:
     ledger = _ledger(root)
-    server = MCPServer("research-compute", instructions=INSTRUCTIONS, version="0.1.2")
+    server = MCPServer("research-compute", instructions=INSTRUCTIONS, version="0.1.3")
 
     def reads(title):
         return ToolAnnotations(title=title, read_only_hint=True, open_world_hint=True)

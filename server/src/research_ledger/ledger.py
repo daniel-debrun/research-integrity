@@ -17,6 +17,7 @@ Kinds:
 - node, launch: a compute node's fingerprint, and a run started on one, recorded before it starts (research-compute).
 - plan, look: what a study tests, sealed before the runs it governs, and one look at its holdout (see plans.py). A
   run or launch tagged to a plan's hypothesis is one of its trials; a claim resting on one records the count.
+- model, verdict: a hypothesis's machine-checked formal model, and its computed verdict (research-formal).
 
 `work/` (snapshot copies and run folders) and `.lock` are not part of the record; the ledger's .gitignore says so.
 """
@@ -31,6 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import critique as cq
+from . import formal as fm
 from . import instruments as ins
 from . import plans as pl
 from . import quotecheck as qc
@@ -243,6 +245,8 @@ class Ledger:
                     pl.verify_entry(self, e, seen)
                 elif e["kind"] in ("plan", "look"):
                     pl.verify_entry(self, e, seen)
+                elif e["kind"] in ("model", "verdict"):
+                    fm.verify_entry(self, e, seen)
                 elif e["kind"] in ("draft", "critique", "answer"):
                     cq.verify_entry(self, e, seen)
                 elif e["kind"] == "citation" and "run" in b:
@@ -274,7 +278,7 @@ class Ledger:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
         kinds = ("source", "instrument", "run", "citation", "claim", "draft", "critique", "answer", "node", "launch",
-                 "plan", "look")
+                 "plan", "look", "model", "verdict")
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]
@@ -283,6 +287,7 @@ class Ledger:
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
                 "problems": problems, "unread": unread, "open_findings": review["open_findings"],
                 "open_launches": open_launches, "personas": review["personas"],
+                "needs_revision": fm.needs_revision(list(seen.values())),
                 "trials": [{"plan": n, "hypothesis": h["id"], **{k: h[k] for k in ("trials", "reported")},
                             "dropped": len(h["dropped"])}
                            for n in sorted({v["body"]["name"] for v in seen.values() if v["kind"] == "plan"})

@@ -46,7 +46,7 @@ def _entry(e: dict) -> dict:
 
 def build(root: str | os.PathLike | None = None) -> MCPServer:
     ledger = Ledger(root or os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")
-    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.1.2")
+    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.1.3")
 
     def reads(title):
         return ToolAnnotations(title=title, read_only_hint=True)

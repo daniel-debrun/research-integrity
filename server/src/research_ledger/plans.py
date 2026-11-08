@@ -206,7 +206,16 @@ def status(entries, name: str) -> dict:
         raise Refusal(f"no plan named {name}")
     ids = {v["id"] for v in versions(entries, name)}
     first = versions(entries, name)[0]["seq"]
-    hyps = [{"id": h["id"], "statement": h["statement"], **counts(entries, name, h["id"])}
+    def formal(hid):
+        model = next((e["id"] for e in reversed(entries) if e["kind"] == "model" and e["body"]["name"] == name
+                      and e["body"]["hypothesis"] == hid), None)
+        verdict = next((e for e in reversed(entries) if e["kind"] == "verdict" and e["body"]["name"] == name
+                        and e["body"]["hypothesis"] == hid), None)
+        return {**({"model": model} if model else {}),
+                **({"verdict": {"id": verdict["id"], "outcome": verdict["body"]["outcome"],
+                                "tests": verdict["body"]["tests"]}} if verdict else {})}
+
+    hyps = [{"id": h["id"], "statement": h["statement"], **counts(entries, name, h["id"]), **formal(h["id"])}
             for h in p["body"]["hypotheses"]]
     tagged = [e for e in entries if e["kind"] == "run" and e["body"].get("plan") in ids]
     used = {e["body"]["instrument"] for e in tagged}
@@ -239,7 +248,10 @@ def claim_trials(entries, citations: list) -> list:
         seen.add((name, h))
         c = counts(entries, name, h)
         reported = len(set(c["runs"]) & (_reported_runs(entries) | mine))
-        out.append({"plan": name, "hypothesis": h, "trials": c["trials"], "reported": reported})
+        verdict = next((e["body"]["outcome"] for e in reversed(entries) if e["kind"] == "verdict"
+                        and e["body"]["name"] == name and e["body"]["hypothesis"] == h), None)
+        out.append({"plan": name, "hypothesis": h, "trials": c["trials"], "reported": reported,
+                    **({"verdict": verdict} if verdict else {})})
     return out
 
 

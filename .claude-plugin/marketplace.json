@@ -14,6 +14,11 @@
       "name": "research-compute",
       "source": "./extras/compute",
       "description": "Optional add-on to research-integrity: compute nodes (this machine, SSH, Slurm) and instruments launched on them, every launch recorded in the research ledger before it starts."
+    },
+    {
+      "name": "research-formal",
+      "source": "./extras/formal",
+      "description": "Optional add-on to research-integrity: a plan's understanding stated as a machine-checked Lean model, with a computed verdict of success or needed revision."
     }
   ]
 }

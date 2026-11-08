@@ -19,6 +19,9 @@ Attack every claim the target makes:
   degenerate model, a tooling bug that voids the evidence?
 - **Alternative explanations** that fit the same evidence.
 - **Provenance.** Is it clear where each state, file and number came from?
+- **Formal models.** If the target has one, read each premise beside its quote, and ask whether they say the same
+  thing, whether `design` proves anything the plan relies on, and whether the tests are the ones the plan stated.
+  A compiling model can still be wrong. Critique it by its model id.
 
 To quote the target draft, cite its draft id as the source, page 1; don't record the draft's file as a source.
 

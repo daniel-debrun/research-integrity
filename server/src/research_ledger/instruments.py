@@ -32,7 +32,7 @@ from pathlib import Path
 from .quotecheck import Refusal
 
 SKIP_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "env", "node_modules", "__pycache__", ".pytest_cache",
-             ".mypy_cache", ".ruff_cache", ".tox", ".ledger", "dist", "build", "state"}
+             ".mypy_cache", ".ruff_cache", ".tox", ".ledger", ".lake", "dist", "build", "state"}
 SKIP_FILES = (".env", ".env.*", "*.key", "*.pem", "*.pyc", ".DS_Store")
 MAX_FILES, MAX_BYTES = 2000, 50 * 2**20          # a snapshot: code, not data or dependencies
 KEEP_OUTPUT = 20 * 2**20                          # an output larger than this is hashed, not kept
