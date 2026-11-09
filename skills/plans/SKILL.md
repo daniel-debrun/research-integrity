@@ -18,8 +18,16 @@ before the runs, every run says which hypothesis it tests, and every claim recor
 3. **Claim on what you ran.** A claim citing a tagged run records the count ("1 of 40 trials"). Report that count
    with the result, and say why the reported run is the one you report.
 4. **Change the plan only by amendment**, with `amend_plan`: the reason, and what prompted it (a finding, a run). An
-   amendment is refused while a blocking finding on the plan is unanswered. Never re-seal under a new name to
-   escape a plan's count.
+   amendment is refused while a blocking finding on the plan is unanswered. Re-sealing the same question under a
+   new name is refused: a trial count belongs to the question. When a new study takes up a question with attempts
+   on record, seal it with `continues` (the earlier plan's id) and give each hypothesis that carries on the earlier
+   id, so its trials come with it. When the work moves to a fresh ledger (a public repository, a publication),
+   declare the trials counted in the old one as `prior_trials`, with its head hash and the counts from its
+   `plan_status`; the claim then says how many were declared.
+7. **Reproduce before you publish.** `reproduce_run` reruns a recorded run and records whether it came out the
+   same, by exit code and declared outputs. Reproduce the run each reported number rests on; a `differs` verdict
+   is a finding against the claim until it is explained. A reproduction spends no trial, and a holdout run needs a
+   fresh look to be reproduced.
 5. **Spend holdout looks deliberately.** `look_holdout` records one look with its reason; pass its id to the single
    run that reads the holdout. Don't read holdout files any other way. Looks are counted, and a failed run still
    spends its look.

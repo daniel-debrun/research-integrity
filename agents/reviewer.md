@@ -13,6 +13,8 @@ the research ledger and the files it rests on, not its author's reasoning.
 - **Earlier critiques.** For each upheld finding on an earlier version (list_findings), check that this version acts
   on it. One that isn't acted on is a blocking finding.
 - **Caveats.** Are the limitations the evidence implies stated, such as sample size, provenance, or what wasn't tested?
+- **Wording.** The `wording` list record_draft answered with: each unquoted "novel", "proves" and the like is a
+  finding, blocking when the word carries the conclusion.
 - **Verify.** Run verify and include any problems it lists.
 
 To quote the target draft, cite its draft id as the source, page 1; don't record the draft's file as a source.

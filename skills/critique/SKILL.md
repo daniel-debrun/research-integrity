@@ -28,6 +28,14 @@ is answered by the work's owner with evidence of their own before the work moves
 6. **Verify.** `verify` reports an upheld finding whose draft or claim still stands, and a claim still resting on a
    run or citation that a finding was upheld against.
 
+## Wording
+
+`record_draft` answers with `wording`: each use of a word the draft may not use on its own authority ("novel",
+"first to", "unprecedented"; "proves", "demonstrates conclusively"), with its line and whether it sits in quoted text.
+The draft is recorded all the same. The reviewer makes a finding of each unquoted use, non-blocking unless the word
+carries the conclusion; a quoted use is someone else's word and needs none. `claim` answers the same way for a
+statement that uses one.
+
 ## Reporting
 
 Never pass a review on as it stands. Report each finding with three parts: what the reviewer said, what you found

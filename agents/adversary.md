@@ -19,6 +19,8 @@ Attack every claim the target makes:
   degenerate model, a tooling bug that voids the evidence?
 - **Alternative explanations** that fit the same evidence.
 - **Provenance.** Is it clear where each state, file and number came from?
+- **Wording.** record_draft's answer lists the draft's `wording` to check ("novel", "proves" and the like, each with
+  its line). Each unquoted use is a finding; a quoted one is someone else's word.
 - **Formal models.** If the target has one, read each premise beside its quote, and ask whether they say the same
   thing, whether `design` proves anything the plan relies on, and whether the tests are the ones the plan stated.
   A compiling model can still be wrong. Critique it by its model id.

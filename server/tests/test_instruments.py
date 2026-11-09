@@ -155,3 +155,50 @@ def test_the_work_folder_can_be_deleted_but_snapshot_files_cannot_be_edited(led,
         (snap / "measure.py").write_text("print('edited')")
     shutil.rmtree(led.root / "work")
     assert not (led.root / "work").exists()
+
+
+def test_a_deterministic_run_reproduces_and_a_timed_one_differs_only_where_it_should(led, tool, secret, tmp_path):
+    run = ins.run(led, register(led, tool)["body"]["name"])
+    rep = ins.reproduce(led, run["id"])
+    b = rep["body"]
+    assert (b["verdict"], b["exit"], b["stdout"], b["outputs"]) == ("reproduced", True, True, {"result.json": True})
+    assert rep["run"]["body"]["reproduces"] == run["id"] and rep["differences"] == {}
+    # a program whose stdout carries the time, but whose declared output is fixed
+    path = program(tmp_path, 'date +%N; echo "reading 0.42" > out.txt')
+    ins.register(led, "timed", str(path), outputs=["*.txt"])
+    r2 = ins.run(led, "timed")
+    rep2 = ins.reproduce(led, r2["id"])
+    assert rep2["body"]["verdict"] == "reproduced" and rep2["body"]["stdout"] is False
+    assert rep2["body"]["outputs"] == {"out.txt": True} and "stdout" in rep2["differences"]
+    # the same program with no declared output: stdout decides
+    ins.register(led, "clock", str(program(tmp_path, "date +%N", "clock")))
+    rep3 = ins.reproduce(led, ins.run(led, "clock")["id"])
+    assert rep3["body"]["verdict"] == "differs" and rep3["differences"]["stdout"].startswith("line 1:")
+    v = led.verify()
+    assert v["ok"] and v["reproduction"] == 3 and v["reproductions"] == {"reproduced": 2, "differs": [rep3["id"]]}
+
+
+def test_a_reproduction_is_refused_for_acting_runs_reproductions_and_drift(led, tmp_path, monkeypatch):
+    ins.register(led, "order", str(program(tmp_path, "echo placed", "order")), acts=True)
+    placed = ins.run(led, "order", acting=True)
+    with pytest.raises(Refusal, match="acts on the outside world"):
+        ins.reproduce(led, placed["id"])
+    ins.register(led, "read", str(program(tmp_path, "echo read", "read")))
+    rep = ins.reproduce(led, ins.run(led, "read")["id"])
+    with pytest.raises(Refusal, match="is itself a reproduction"):
+        ins.reproduce(led, rep["body"]["by"])
+    monkeypatch.setattr(ins, "drift", lambda led, inst, where=ins.LOCAL: ["`read` is a different file"])
+    with pytest.raises(Refusal, match="has changed since it was registered"):
+        ins.reproduce(led, rep["body"]["of"])
+
+
+def test_verify_finds_a_doctored_reproduction(led, tmp_path):
+    ins.register(led, "clock", str(program(tmp_path, "date +%N", "clock")))
+    rep = ins.reproduce(led, ins.run(led, "clock")["id"])
+    assert rep["body"]["verdict"] == "differs"
+    chain = led.chain.read_text().replace('"verdict":"differs"', '"verdict":"reproduced"')
+    led.chain.write_text(chain)
+    problems = led.verify()["problems"]
+    assert any("does not match its hash" in p for p in problems)
+    led._append("reproduction", {**rep["body"], "verdict": "reproduced"})
+    assert any("its comparison is not what the two runs' records give" in p for p in led.verify()["problems"])

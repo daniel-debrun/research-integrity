@@ -7,7 +7,8 @@ against the stored pages and, where a source's file is still there, against the 
 
 Kinds:
 - source: a document as read (its bytes' sha256, its page texts as a blob).
-- instrument, run: a program recorded by its exact code and environment, and one run of it (see instruments.py).
+- instrument, run, reproduction: a program recorded by its exact code and environment, one run of it, and a rerun
+  compared with it (see instruments.py).
 - citation: a verbatim quote on one page of a source, or in a run's output, and the numbers it is cited for, each
   written in the quote.
 - claim: a statement resting on citations; every number the statement writes is written in a quote it cites. A
@@ -196,7 +197,9 @@ class Ledger:
             old = self.get(supersedes, "claim")
             cq.gate(self.entries(), old["id"])
             body["supersedes"] = old["id"]
-        return self._append("claim", body)
+        e = self._append("claim", body)
+        words = cq.wording(text)
+        return {**e, "wording": words} if words else e
 
     # --- checking -------------------------------------------------------------------------------------------------
     def document(self, origin: str) -> bytes | None:
@@ -240,7 +243,7 @@ class Ledger:
                         raise Refusal("its file has changed since it was recorded", b["origin"])
                     else:
                         fresh[e["id"]] = qc.forms_of(data, b["origin"])
-                elif e["kind"] in ("instrument", "run", "node", "launch"):
+                elif e["kind"] in ("instrument", "run", "node", "launch", "reproduction"):
                     ins.verify_entry(self, e, seen)
                     pl.verify_entry(self, e, seen)
                 elif e["kind"] in ("plan", "look"):
@@ -277,15 +280,18 @@ class Ledger:
             except FileNotFoundError:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
-        kinds = ("source", "instrument", "run", "citation", "claim", "draft", "critique", "answer", "node", "launch",
-                 "plan", "look", "model", "verdict")
+        kinds = ("source", "instrument", "run", "reproduction", "citation", "claim", "draft", "critique", "answer",
+                 "node", "launch", "plan", "look", "model", "verdict")
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]
         ran = {v["body"].get("launch") for v in seen.values() if v["kind"] == "run"}
         open_launches = [v["id"] for v in seen.values() if v["kind"] == "launch" and v["id"] not in ran]
+        reps = [v for v in seen.values() if v["kind"] == "reproduction"]
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
                 "problems": problems, "unread": unread, "open_findings": review["open_findings"],
+                "reproductions": {"reproduced": sum(r["body"]["verdict"] == "reproduced" for r in reps),
+                                  "differs": [r["id"] for r in reps if r["body"]["verdict"] == "differs"]},
                 "open_launches": open_launches, "personas": review["personas"],
                 "needs_revision": fm.needs_revision(list(seen.values())),
                 "trials": [{"plan": n, "hypothesis": h["id"], **{k: h[k] for k in ("trials", "reported")},

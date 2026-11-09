@@ -111,3 +111,74 @@ def test_verify_finds_a_run_tagged_to_a_replaced_version(led, tool):
     r = trial(led, tool, "5")
     led._append("run", {**r["body"], "plan": old["id"]})
     assert any("an earlier amendment had already replaced" in p for p in led.verify()["problems"])
+
+
+def test_a_question_is_sealed_once_unless_the_new_plan_continues_the_old(led, tool):
+    old = pl.seal(led, "loss-study", "Does the new loss help?", H)
+    trial(led, tool, "1")
+    trial(led, tool, "5")
+    with pytest.raises(Refusal, match="already sealed as loss-study") as r:
+        pl.seal(led, "loss-study-v2", "does the new loss help", H)
+    assert f'continues="{old["id"]}"' in r.value.fix
+    with pytest.raises(Refusal, match="is not a plan of the ledger"):
+        pl.seal(led, "loss-study-v2", "Does the new loss help?", H, continues="plan:000000000000")
+    new = pl.seal(led, "loss-study-v2", "Does the new loss help?",
+                  [{**H[0], "id": "H1"}, {"statement": "it is faster", "metric": "s/epoch", "success": "under 10"}],
+                  continues=old["id"])
+    assert [h["id"] for h in new["body"]["hypotheses"]] == ["H1", "H3"] and new["body"]["continues"] == old["id"]
+    ins.run(led, tool, ["2"], tags=pl.tag(led, "loss-study-v2", "H1"))
+    st = pl.status(led.entries(), "loss-study-v2")
+    h1, h3 = st["hypotheses"]
+    assert (h1["trials"], h1["own"], h1["inherited"]) == (3, 1, 2) and (h3["trials"], h3["inherited"]) == (0, 0)
+    assert st["continues"] == ["loss-study"]
+    assert pl.status(led.entries(), "loss-study")["hypotheses"][0]["trials"] == 2
+    assert led.verify()["ok"]
+
+
+def test_declared_prior_trials_count_and_show_in_a_claim(led, tool):
+    with pytest.raises(Refusal, match="says where the trials were counted"):
+        pl.seal(led, "loss-study", "Does the new loss help?", H, prior_trials={"H1": 12})
+    with pytest.raises(Refusal, match="names H9, which is not a hypothesis"):
+        pl.seal(led, "loss-study", "Does the new loss help?", H, prior_trials={"from": "abc", "H9": 1})
+    with pytest.raises(Refusal, match="is not a count"):
+        pl.seal(led, "loss-study", "Does the new loss help?", H, prior_trials={"from": "abc", "H1": -1})
+    p = pl.seal(led, "loss-study", "Does the new loss help?", H, prior_trials={"from": "ledger head 7f3a…", "H1": 12})
+    assert p["body"]["prior_trials"] == {"from": "ledger head 7f3a…", "H1": 12}
+    r = trial(led, tool, "5")
+    c = led.cite_run(r["id"], "variant 5 scores 0.51 on the dev split", ["0.51"])
+    k = led.claim("The new loss scores 0.51 on dev.", [c["id"]])
+    assert k["body"]["trials"] == [{"plan": "loss-study", "hypothesis": "H1", "trials": 13, "reported": 1,
+                                    "declared": 12}]
+    a = pl.amend(led, "loss-study", "narrow it", question="Does the new loss help on small data?")
+    assert a["body"]["prior_trials"] == p["body"]["prior_trials"]
+    assert pl.status(led.entries(), "loss-study")["hypotheses"][1]["declared"] == 0 and led.verify()["ok"]
+
+
+def test_verify_finds_a_resealed_question_and_bad_prior_trials(led):
+    p = pl.seal(led, "loss-study", "Does the new loss help?", H)
+    led._append("plan", {**p["body"], "name": "again"})
+    assert any("seals the question of loss-study again under a new name" in x for x in led.verify()["problems"])
+    led._append("plan", {**p["body"], "name": "third", "question": "Other?", "prior_trials": {"H1": 3}})
+    assert any("prior_trials are not counts" in x for x in led.verify()["problems"])
+    led._append("plan", {**p["body"], "name": "fourth", "question": "Another?", "continues": "plan:nope"})
+    assert any("continues plan:nope, which is not an earlier plan" in x for x in led.verify()["problems"])
+
+
+def test_a_reproduction_counts_as_no_trial_and_a_holdout_rerun_needs_a_fresh_look(led, tool, holdout):
+    pl.seal(led, "loss-study", "Does the new loss help?", H, [str(holdout)])
+    r = trial(led, tool, "5")
+    rep = ins.reproduce(led, r["id"])
+    st = pl.status(led.entries(), "loss-study")
+    assert st["hypotheses"][0]["trials"] == 1 and st["untagged_runs"] == []
+    assert "plan" not in rep["run"]["body"] and rep["body"]["verdict"] == "reproduced"
+    lk = pl.look(led, "loss-study", "the dev result is final")
+    held = trial(led, tool, "9", "H2", lk["id"])
+    with pytest.raises(Refusal, match="spent the holdout look"):
+        ins.reproduce(led, held["id"])
+    with pytest.raises(Refusal, match="is spent by"):
+        ins.reproduce(led, held["id"], pl.spend(led, lk["id"], held))
+    again = pl.look(led, "loss-study", "reproduce the holdout run")
+    rep2 = ins.reproduce(led, held["id"], pl.spend(led, again["id"], held))
+    assert rep2["run"]["body"]["look"] == again["id"] and rep2["body"]["verdict"] == "reproduced"
+    assert [l["used_by"] for l in pl.status(led.entries(), "loss-study")["looks"]] == [held["id"], rep2["run"]["id"]]
+    assert pl.status(led.entries(), "loss-study")["hypotheses"][1]["trials"] == 1 and led.verify()["ok"]

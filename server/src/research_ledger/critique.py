@@ -15,11 +15,16 @@ Kinds:
 
 `verify` adds: an upheld finding whose draft or claim still stands is a problem (supersede it), as is a standing
 claim resting on a citation or run against which a finding was upheld; blocking findings not yet answered are listed.
+
+Recording a draft also lists its wording to check: words that claim more than evidence can show ("novel", "proves").
+They are listed, never refused: the draft is recorded as it is so the review can target that exact text, and a
+draft that quotes someone else's "novel" claim is marked quoted, not penalised.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from . import quotecheck as qc
@@ -28,6 +33,36 @@ from .quotecheck import Refusal
 VERDICTS = ("upheld", "dismissed")
 TARGETS = ("draft", "claim", "run", "citation", "plan", "model")
 EVIDENCE = ("citation", "run")
+
+# Words a draft may not use on its own authority. Each: the rule, the pattern, what to write instead.
+WORDING = (
+    ("novelty", r"novel(?:ty)?|first to|no prior (?:work|stud(?:y|ies))|unprecedented",
+     'never allowed: write "not found in the searched sources" and cite the search'),
+    ("proof", r"prove[sdn]?|demonstrates? conclusively",
+     "never allowed: say what the result supports, and with what interval"),
+)
+_WORDING = [(rule, re.compile(rf"\b(?:{pat})\b", re.I), need) for rule, pat, need in WORDING]
+_QUOTED = re.compile(r'`[^`\n]*`|"[^"\n]*"|\u201c[^\u201d\n]*\u201d')
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def wording(text: str) -> list:
+    """Each use of a word in WORDING: its rule, line, the word as written, the sentence around it, and whether it
+    sits in quoted text (a blockquote, a code block, backticks or double quotes), where it is someone else's word."""
+    out, fenced = [], False
+    for n, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        quoted_line = fenced or line.lstrip().startswith(">")
+        spans = [m.span() for m in _QUOTED.finditer(line)]
+        for rule, pat, need in _WORDING:
+            for m in pat.finditer(line):
+                start = m.start()
+                sentence = next((x for x in _SENTENCE.split(line) if m.group(0) in x), line).strip()
+                out.append({"rule": rule, "line": n, "word": m.group(0), "sentence": sentence[:300],
+                            "quoted": quoted_line or any(a <= start < b for a, b in spans), "need": need})
+    return out
 
 
 def _findings(entries) -> dict:
@@ -63,7 +98,8 @@ def gate(entries, target: str) -> None:
 
 
 def record_draft(led, path: str, supersedes: str = "") -> dict:
-    """Record a file's text as a draft version, and the numbers in it that no citation's quote writes."""
+    """Record a file's text as a draft version, the numbers in it that no citation's quote writes, and its wording
+    to check (see `wording`)."""
     p = Path(path).expanduser()
     if not p.is_file():
         raise Refusal(f"no file at {path}", "a draft is a text file: an issue, a report, a plan, a paper")
@@ -81,7 +117,7 @@ def record_draft(led, path: str, supersedes: str = "") -> dict:
                            if e["kind"] == "citation" and e["body"].get("source") not in drafts))
     untraced = sorted(qc.numbers(text) - quoted)
     if known and (not supersedes or known["body"]["supersedes"] == supersedes):
-        return {**known, "already": True, "untraced_numbers": [str(n) for n in untraced]}
+        return {**known, "already": True, "untraced_numbers": [str(n) for n in untraced], "wording": wording(text)}
     old = None
     if supersedes:
         old = led.get(supersedes, "draft")
@@ -94,7 +130,7 @@ def record_draft(led, path: str, supersedes: str = "") -> dict:
     body = {"path": str(path), "sha256": sha, "text": led._put_blob(data),
             "version": old["body"]["version"] + 1 if old else 1, "supersedes": old["id"] if old else "",
             "answered": answered}
-    return {**led._append("draft", body), "untraced_numbers": [str(n) for n in untraced]}
+    return {**led._append("draft", body), "untraced_numbers": [str(n) for n in untraced], "wording": wording(text)}
 
 
 def _evidence(led, ids, after: int = -1) -> list:

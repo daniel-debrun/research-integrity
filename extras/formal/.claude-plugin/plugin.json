@@ -1,6 +1,6 @@
 {
   "name": "research-formal",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Optional add-on to research-integrity: a plan's understanding stated as a machine-checked Lean model, with parameters derived from cited premises, and a computed verdict of success or needed revision.",
   "author": { "name": "daniel-debrun" },
   "license": "Apache-2.0",

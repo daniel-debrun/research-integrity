@@ -152,3 +152,25 @@ def test_an_unchanged_revision_is_refused_and_draft_quotes_trace_nothing(led, wo
         cq.record_draft(led, str(work["draft"]), supersedes=v1)
     work["draft"].write_text("The solver needs 2 to 3 iterations; the CPU made 416 runs.\n")
     assert cq.record_draft(led, str(work["draft"]), supersedes=v1)["untraced_numbers"] == ["2", "3"]
+
+
+def test_a_draft_lists_its_wording_to_check_and_marks_quoted_uses(led, tmp_path):
+    (tmp_path / "w.md").write_text('A novel loss that proves the point.\n'
+                                   '> the authors call it "novel"\n'
+                                   '```\nproves nothing: code\n```\n'
+                                   'They claim a "novel" result; we improved on it.\n')
+    d = cq.record_draft(led, str(tmp_path / "w.md"))
+    hits = [(w["rule"], w["line"], w["word"], w["quoted"]) for w in d["wording"]]
+    assert hits == [("novelty", 1, "novel", False), ("proof", 1, "proves", False),
+                    ("novelty", 2, "novel", True), ("proof", 4, "proves", True), ("novelty", 6, "novel", True)]
+    assert d["wording"][0]["sentence"] == "A novel loss that proves the point." and d["wording"][0]["need"]
+    assert cq.record_draft(led, str(tmp_path / "w.md"))["wording"] == d["wording"]
+    (tmp_path / "ok.md").write_text("The result supports a gain of 0.2, interval 0.1 to 0.3; approved.\n")
+    assert cq.record_draft(led, str(tmp_path / "ok.md"))["wording"] == []
+
+
+def test_a_claim_answers_with_its_wording_but_is_recorded(led, work):
+    c = led.cite(work["log"]["id"], 1, "CPU runs: 416\nblow-ups: 6 of 40 runs", ["416"])
+    k = led.claim("416 CPU runs prove the solver is stable.", [c["id"]])
+    assert k["id"].startswith("claim:") and [w["word"] for w in k["wording"]] == ["prove"]
+    assert "wording" not in led.claim("The CPU made 416 runs.", [c["id"]]) and led.verify()["ok"]

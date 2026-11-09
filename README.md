@@ -23,7 +23,7 @@ tests, and a claim records how many trials stand behind it, so a best-of-forty c
 | Part | What it does | Where it runs |
 |---|---|---|
 | `skills/citation-check/` | The method: read, quote verbatim, cite with numbers, claim on citations, verify. Ships `scripts/quotecheck.py`, the same check as the server, standard library only. | Any Agent Skills client: Claude Code, Claude Science, Cowork, Codex and others |
-| `server/` (`research-ledger`) | An MCP server (stdio) over the ledger: `add_source`, `read_page`, `cite`, `claim`, `verify`, `list_entries`, and for instruments `register_instrument`, `run_instrument`, `run_acting_instrument`, `cite_run`. Every tool is annotated; only `run_acting_instrument` is destructive. | Any MCP client that runs a local command |
+| `server/` (`research-ledger`) | An MCP server (stdio) over the ledger: `add_source`, `read_page`, `cite`, `claim`, `verify`, `list_entries`, and for instruments `register_instrument`, `run_instrument`, `run_acting_instrument`, `reproduce_run`, `cite_run`. Every tool is annotated; only `run_acting_instrument` and `look_holdout` are destructive. | Any MCP client that runs a local command |
 | `skills/plans/` | Decide before you look: seal the plan, tag every run, report the trial count, spend holdout looks deliberately. | Any Agent Skills client |
 | `skills/critique/` | How a review is recorded and answered, and how to report it: each finding with what you found when you checked. | Any Agent Skills client |
 | `agents/` | Five personas: `adversary` and `reviewer` (record critiques; can't edit, run shells or answer findings), `scout` (finds and cites sources), `replicator` (re-derives a number with its own code), `experimenter` (runs the planned measurements). | Claude Code |
@@ -89,8 +89,18 @@ An instrument registered with `acts` (it places an order, sends a message) runs 
 `run_acting_instrument`, which is annotated destructive, so a client that asks before destructive actions asks
 before each of its runs. `run_instrument` refuses it.
 
-`verify` checks each instrument's code and each run's stored output against their hashes, and each citation of a run
-against the stored output. It does not run anything again.
+`reproduce_run` runs a recorded run again: the same instrument version, the same args, the same way, after the same
+drift check. The rerun is recorded as a run marked `reproduces`, and a `reproduction` entry records the comparison:
+the exit code and every declared output by sha256 decide the verdict, `reproduced` or `differs`; stdout stands in
+when the instrument declares no outputs; stderr is compared and shown but never decides, since it carries timings. The
+reply gives the first differing line of each output that differs, so a timestamp is told from a number at a glance.
+A reproduction counts as no trial of any plan. It is refused for an instrument that acts (it would act again), for a
+run made on a compute node (launch it again there), and for a run that spent a holdout look unless a fresh look is
+passed: reproducing a holdout run is another look.
+
+`verify` checks each instrument's code and each run's stored output against their hashes, each citation of a run
+against the stored output, and each reproduction's comparison against the two runs' records. It does not run anything
+again; `reproduce_run` does.
 
 ## Plans and trials
 
@@ -111,10 +121,21 @@ seal, and the look's id goes to the one run that reads the holdout. A look whose
 counted, not limited, and the tool is annotated destructive, so a client that asks before destructive actions asks
 before each look.
 
+A trial count belongs to the question, not to the plan's name or the folder. `seal_plan` refuses a question that an
+earlier plan already asks (compared without case, spacing or final punctuation) unless the new plan `continues` that
+plan by id; then a hypothesis given one of the earlier plan's ids inherits that id's trials, and `plan_status` shows
+the lineage and the `inherited` count. A plan started in a fresh ledger, say one made for a publication, declares the
+trials counted elsewhere as `prior_trials`, with where they were counted (a ledger head hash, a URL, a path); they are
+counted as `declared` and a claim's count says so ("rests on 1 of 40 trials, 28 declared"). A declaration is the
+author's word: the ledger cannot see another ledger.
+
 ## Reviews
 
 `record_draft` records a text file (an issue, a report, a plan, a paper) at its exact text, and lists the numbers in
-it that no citation's quote writes. `record_critique` records a reviewer's findings on a draft, claim, run or
+it that no citation's quote writes and its wording to check: each "novel", "first to", "unprecedented", "proves" or
+"demonstrates conclusively", with its line and whether it sits inside a quote, a blockquote or code, where it is
+someone else's word. Wording is listed, never refused: the draft is recorded as it is so the review can target that
+text, and a reviewer makes a finding of each unquoted use. `claim` answers the same way for a statement that uses one. `record_critique` records a reviewer's findings on a draft, claim, run or
 citation. Each finding says what is wrong and where, and whether it is blocking (it would change the conclusion or
 the plan). It names the citations or runs the reviewer recorded as evidence; a finding with none is marked
 unsupported.
@@ -160,6 +181,13 @@ at a point in time, commit `.ledger/` with the work it backs.
   that evidence bears on the finding; the record makes it one step to look.
 - **What you record.** `add_source` takes any file, and its text is stored in `.ledger/blobs/`. Look before you
   commit `.ledger/`, and don't commit papers you may not redistribute.
+- **What a reproduction shows.** A rerun that matches shows the code gives the same output in the same environment
+  on this machine. It does not show the output is right. A run that reads the clock or the network differs for
+  reasons that are not errors; declare outputs so the comparison is on the figures, not the log.
+- **A declared prior count.** `prior_trials` is the author's word about another ledger, recorded as such. Nothing
+  here reads that ledger. Keep it where its head hash can be checked.
+- **Wording.** The list is two word families. "Significant" without a test and "outperforms" without a comparison are
+  not flagged: the ledger has no entry kind for a test or a comparison to check them against.
 
 ## Data and network use
 

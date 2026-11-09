@@ -10,6 +10,11 @@ has changed. It records the args, the exit code and the sha256 of its stdout, it
 with the declared secrets' values masked, and it is recorded when it fails too. A citation can quote a run's output
 the way it quotes a page.
 
+A `reproduction` runs a recorded run again, the same version with the same args, and records whether it came out
+the same: the exit code and every declared output by sha256 decide (stdout stands in when nothing is declared);
+stderr is compared and shown but never decides. The rerun is a run like any other, marked `reproduces`, and counts
+as no trial of any plan.
+
 Who may register or run an instrument is the agent's mode's to decide: nothing here asks. An instrument that acts on
 the outside world (an order, a message) runs only through its own tool, which is annotated destructive so that hosts
 that ask before such actions ask.
@@ -375,6 +380,69 @@ def run(led, ref: str, args=(), acting: bool = False, tags: dict | None = None) 
     return {**e, "stdout_tail": _tail(stdout), "stderr_tail": _tail(stderr), "shown": shown}
 
 
+# --- reproducing ----------------------------------------------------------------------------------------------------
+def compare(a: dict, b: dict) -> dict:
+    """How two runs' recorded outputs compare: exit (code and timeout), stdout, stderr, each declared output present
+    in either, and the verdict: `reproduced` when exit matches and every declared output does (stdout, when the
+    runs wrote no declared output), else `differs`."""
+    outputs = {rel: a["outputs"].get(rel, {}).get("sha") == b["outputs"].get(rel, {}).get("sha")
+               for rel in sorted(set(a["outputs"]) | set(b["outputs"]))}
+    exit_same = a["exit"] == b["exit"] and a["timed_out"] == b["timed_out"]
+    stdout_same = a["stdout"] == b["stdout"]
+    decided = all(outputs.values()) if outputs else stdout_same
+    return {"exit": exit_same, "stdout": stdout_same, "stderr": a["stderr"] == b["stderr"], "outputs": outputs,
+            "verdict": "reproduced" if exit_same and decided else "differs"}
+
+
+def _first_difference(led, a: dict, b: dict, file: str) -> str | None:
+    """The first line that differs between two runs' text output `file`, as "line N: … | …"; None when it cannot be
+    read as text on both sides."""
+    try:
+        x, y = output_text(led, a, file).splitlines(), output_text(led, b, file).splitlines()
+    except Refusal:
+        return None
+    for n, (p, q) in enumerate(zip(x, y), 1):
+        if p != q:
+            return f"line {n}: {p[:120]!r} | {q[:120]!r}"
+    if len(x) != len(y):
+        return f"line {min(len(x), len(y)) + 1}: one side ends"
+    return None
+
+
+def reproduce(led, run_id: str, tags: dict | None = None) -> dict:
+    """Run a recorded run's instrument version again with the same args, record the rerun as a run that
+    `reproduces` it, and record a `reproduction` comparing the two. Refused for a run on a node, of an instrument
+    that acts, of a reproduction, or that spent a holdout look unless `tags` spends a new one."""
+    orig = led.get(run_id, "run")
+    ob = orig["body"]
+    inst = led.get(ob["instrument"], "instrument")
+    b = inst["body"]
+    label = f"{b['name']}@{b['version']}"
+    if ob.get("reproduces"):
+        raise Refusal(f"{run_id} is itself a reproduction of {ob['reproduces']}", "a reproduction is of a run",
+                      f"reproduce {ob['reproduces']}")
+    if b.get("node") or ob.get("launch"):
+        raise Refusal(f"{run_id} ran on the node {b.get('node', '')}".rstrip(), "a reproduction runs here",
+                      "launch the instrument again with launch_instrument (research-compute) and compare its "
+                      "outputs by hand")
+    if b["acts"]:
+        raise Refusal(f"{label} acts on the outside world", "a reproduction would act again; an acting run's record "
+                      "is the output it left", "cite its recorded output")
+    if ob.get("look") and not (tags or {}).get("look"):
+        raise Refusal(f"{run_id} spent the holdout look {ob['look']}", "reproducing it is another look at the "
+                      "holdout", "spend one with look_holdout and pass its id as look")
+    e = run(led, label, ob["args"], False, {**(tags or {}), "reproduces": orig["id"]})
+    rep = led._append("reproduction", {"of": orig["id"], "by": e["id"], **compare(ob, e["body"])})
+    hints = {}
+    for file in ["stdout"] + [k for k, same in rep["body"]["outputs"].items() if not same]:
+        if file == "stdout" and rep["body"]["stdout"]:
+            continue
+        d = _first_difference(led, orig, e, file)
+        if d:
+            hints[file] = d
+    return {**rep, "run": e, "differences": hints}
+
+
 def output_text(led, run_entry: dict, file: str) -> str:
     """The text a citation of a run quotes: its stdout, its stderr, or one of its kept text outputs."""
     b = run_entry["body"]
@@ -408,9 +476,23 @@ def verify_entry(led, e: dict, seen: dict) -> None:
     elif e["kind"] == "launch":
         if seen.get(b["instrument"], {}).get("kind") != "instrument":
             raise Refusal(f"launches {b['instrument']}, which is not an earlier instrument")
+    elif e["kind"] == "reproduction":
+        of, by = seen.get(b["of"]), seen.get(b["by"])
+        if not of or of["kind"] != "run" or not by or by["kind"] != "run":
+            raise Refusal("compares ids that are not two earlier runs")
+        if by["body"].get("reproduces") != of["id"] or by["body"]["instrument"] != of["body"]["instrument"]:
+            raise Refusal(f"{b['by']} is not a rerun of {b['of']}")
+        if {k: b[k] for k in ("exit", "stdout", "stderr", "outputs", "verdict")} != compare(of["body"], by["body"]):
+            raise Refusal("its comparison is not what the two runs' records give")
     elif e["kind"] == "run":
         if seen.get(b["instrument"], {}).get("kind") != "instrument":
             raise Refusal(f"runs {b['instrument']}, which is not an earlier instrument")
+        if b.get("reproduces"):
+            of = seen.get(b["reproduces"])
+            if not of or of["kind"] != "run" or of["body"]["instrument"] != b["instrument"]:
+                raise Refusal(f"reproduces {b['reproduces']}, which is not an earlier run of its instrument")
+            if b.get("plan"):
+                raise Refusal("is a reproduction and a tagged trial at once")
         if b.get("launch") and (seen.get(b["launch"], {}).get("kind") != "launch"
                                 or seen[b["launch"]]["body"]["instrument"] != b["instrument"]):
             raise Refusal(f"records {b['launch']}, which is not an earlier launch of its instrument")

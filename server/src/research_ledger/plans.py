@@ -14,6 +14,11 @@ are listed too, as trials the plan may not be counting.
 A `look` spends one view of the holdout: it is recorded with its reason, refused if a holdout file changed since the
 seal, and at most one run uses it. Looks are counted, not limited. Nothing stops a program from reading a holdout file
 directly on this machine; the record shows which runs said they did.
+
+A trial count belongs to the question, not to the plan's name or the folder. Sealing a question that an earlier plan
+already asks is refused unless the new plan `continues` that plan, in which case a hypothesis that keeps an earlier id
+inherits its trials. A plan started in a fresh ledger declares the trials counted elsewhere as `prior_trials`, with
+where they were counted; the declaration is the author's word, recorded so the count says so.
 """
 
 from __future__ import annotations
@@ -41,6 +46,41 @@ def versions(entries, name: str) -> list:
 def current(entries, name: str):
     v = versions(entries, name)
     return v[-1] if v else None
+
+
+def _question_key(q: str) -> str:
+    return " ".join(q.lower().split()).rstrip(".?! ")
+
+
+def _same_question(entries, question: str, name: str):
+    """The latest version of another plan asking this question, if any."""
+    key = _question_key(question)
+    names = {e["body"]["name"] for e in entries if e["kind"] == "plan" and e["body"]["name"] != name
+             and _question_key(e["body"]["question"]) == key}
+    return next((current(entries, n) for n in sorted(names)), None)
+
+
+def _prior(prior, hypotheses: list) -> dict:
+    """Trials declared from a ledger that is not this one: {"from": where, "<hypothesis id>": count, ...}."""
+    if not prior:
+        return {}
+    if not isinstance(prior, dict) or not str(prior.get("from", "")).strip():
+        raise Refusal("prior_trials says where the trials were counted", 'give {"from": a ledger head hash, URL or '
+                      'path, "H1": 12, ...}', "take the counts from that ledger's plan_status")
+    ids = {h["id"] for h in hypotheses}
+    out = {"from": str(prior["from"]).strip()}
+    for k, v in prior.items():
+        if k == "from":
+            continue
+        if k not in ids:
+            raise Refusal(f"prior_trials names {k}, which is not a hypothesis of the plan",
+                          f"its hypotheses are {', '.join(sorted(ids))}")
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            raise Refusal(f"prior_trials[{k}] is not a count", "a whole number of trials, 0 or more")
+        out[k] = v
+    if len(out) == 1:
+        raise Refusal("prior_trials declares no count", 'give a count per hypothesis id, such as {"H1": 12}')
+    return out
 
 
 def _hypotheses(items, old=()) -> list:
@@ -86,16 +126,33 @@ def _holdout(paths) -> list:
     return out
 
 
-def seal(led, name: str, question: str, hypotheses: list, holdout=()) -> dict:
-    """Record a plan before the runs it governs."""
+def seal(led, name: str, question: str, hypotheses: list, holdout=(), continues: str = "", prior_trials=None) -> dict:
+    """Record a plan before the runs it governs. `continues` names an earlier plan whose question this one takes up:
+    a hypothesis keeping one of its ids inherits that id's trials. `prior_trials` declares trials counted in another
+    ledger."""
     if not name.strip() or not question.strip():
         raise Refusal("a plan needs a name and a question")
-    if current(led.entries(), name):
+    entries = led.entries()
+    if current(entries, name):
         raise Refusal(f"a plan named {name} is already sealed", "a plan changes only by amendment, with its reason",
                       "amend it with amend_plan")
-    return led._append("plan", {"name": name, "question": question.strip(), "hypotheses": _hypotheses(hypotheses),
+    prev = None
+    if continues:
+        prev = led.get(continues, "plan")
+        if current(entries, prev["body"]["name"])["id"] != prev["id"]:
+            raise Refusal(f"{continues} was replaced by an amendment", "a plan continues the latest version",
+                          f"continue {current(entries, prev['body']['name'])['id']}")
+    same = _same_question(entries, question, name)
+    if same and not prev:
+        raise Refusal(f"a plan asking this question is already sealed as {same['body']['name']} ({same['id']})",
+                      "a trial count belongs to the question; a new name would start it at zero",
+                      f"amend {same['body']['name']}, or seal this plan with continues=\"{same['id']}\" so their "
+                      "trials are counted together")
+    hyps = _hypotheses(hypotheses, prev["body"]["hypotheses"] if prev else ())
+    return led._append("plan", {"name": name, "question": question.strip(), "hypotheses": hyps,
                                 "holdout": _holdout(holdout), "version": 1, "supersedes": "", "reason": "",
-                                "because": []})
+                                "because": [], "continues": prev["id"] if prev else "",
+                                "prior_trials": _prior(prior_trials, hyps)})
 
 
 def amend(led, name: str, reason: str, question: str = "", hypotheses=None, holdout=None, because=()) -> dict:
@@ -115,7 +172,8 @@ def amend(led, name: str, reason: str, question: str = "", hypotheses=None, hold
     body = {"name": name, "question": question.strip() or b["question"],
             "hypotheses": _hypotheses(hypotheses, b["hypotheses"]) if hypotheses is not None else b["hypotheses"],
             "holdout": _holdout(holdout) if holdout is not None else b["holdout"], "version": b["version"] + 1,
-            "supersedes": old["id"], "reason": reason.strip(), "because": list(because or [])}
+            "supersedes": old["id"], "reason": reason.strip(), "because": list(because or []),
+            "continues": b.get("continues", ""), "prior_trials": b.get("prior_trials", {})}
     if {k: body[k] for k in ("question", "hypotheses", "holdout")} == {k: b[k] for k in ("question", "hypotheses",
                                                                                          "holdout")}:
         raise Refusal("the amendment changes nothing", "an amendment changes the question, a hypothesis or the holdout")
@@ -167,6 +225,23 @@ def tag(led, plan: str = "", hypothesis: str = "", look_id: str = "") -> dict:
     return out
 
 
+def spend(led, look_id: str, run_entry: dict) -> dict:
+    """The tag for a reproduction that spends `look_id`, a fresh look at the plan whose look the original run spent.
+    It carries the look alone: a reproduction is no trial."""
+    if not look_id:
+        return {}
+    entries = led.entries()
+    lk = led.get(look_id, "look")
+    spent = led.get(run_entry["body"]["look"], "look")
+    if lk["body"]["name"] != spent["body"]["name"]:
+        raise Refusal(f"{look_id} is a look at {lk['body']['name']}, not {spent['body']['name']}")
+    used = next((e for e in entries if e["kind"] in ("run", "launch") and e["body"].get("look") == look_id), None)
+    if used:
+        raise Refusal(f"{look_id} is spent by {used['id']}", "one run per look; a look whose run fails stays spent",
+                      "take another look with look_holdout, and its reason")
+    return {"look": look_id}
+
+
 # --- counting -------------------------------------------------------------------------------------------------------
 def _standing_claims(entries) -> list:
     superseded = {e["body"].get("supersedes") for e in entries if e["kind"] == "claim"} - {"", None}
@@ -185,8 +260,24 @@ def _ok(run: dict) -> bool:
     return b["exit"] == 0 and not b["timed_out"] and not any(b.get(k) for k in ("stopped", "lost", "error"))
 
 
+def lineage(entries, name: str) -> list:
+    """The plans this one continues, nearest first, by name."""
+    out, seen = [], {name}
+    by_id = {e["id"]: e for e in entries if e["kind"] == "plan"}
+    p = versions(entries, name)
+    cont = p[0]["body"].get("continues", "") if p else ""
+    while cont and cont in by_id and by_id[cont]["body"]["name"] not in seen:
+        n = by_id[cont]["body"]["name"]
+        out.append(n)
+        seen.add(n)
+        cont = versions(entries, n)[0]["body"].get("continues", "")
+    return out
+
+
 def counts(entries, name: str, hypothesis: str) -> dict:
-    """Trials of one hypothesis: every tagged run and every launch not yet recorded as a run."""
+    """Trials of one hypothesis: every tagged run and every launch not yet recorded as a run, plus the trials of the
+    same hypothesis id in the plans this one continues (`inherited`) and the ones declared from another ledger
+    (`declared`). `trials` is their sum."""
     ids = {v["id"] for v in versions(entries, name)}
     runs = [e for e in entries if e["kind"] == "run" and e["body"].get("plan") in ids
             and e["body"].get("hypothesis") == hypothesis]
@@ -195,7 +286,16 @@ def counts(entries, name: str, hypothesis: str) -> dict:
              and e["body"].get("hypothesis") == hypothesis and e["id"] not in ran]
     reported = _reported_runs(entries)
     ok = [r for r in runs if _ok(r)]
-    return {"trials": len(runs) + len(open_), "succeeded": len(ok), "failed": len(runs) - len(ok),
+    inherited = 0
+    for n in lineage(entries, name):
+        c = counts(entries, n, hypothesis)
+        inherited += c["own"] + c["declared"]
+    v = versions(entries, name)
+    declared = sum(c for k, c in (v[0]["body"].get("prior_trials", {}) if v else {}).items()
+                   if k == hypothesis)
+    own = len(runs) + len(open_)
+    return {"trials": own + inherited + declared, "own": own, "inherited": inherited, "declared": declared,
+            "succeeded": len(ok), "failed": len(runs) - len(ok),
             "running": len(open_), "reported": sum(r["id"] in reported for r in runs),
             "dropped": [r["id"] for r in ok if r["id"] not in reported], "runs": [r["id"] for r in runs]}
 
@@ -220,7 +320,7 @@ def status(entries, name: str) -> dict:
     tagged = [e for e in entries if e["kind"] == "run" and e["body"].get("plan") in ids]
     used = {e["body"]["instrument"] for e in tagged}
     untagged = [e["id"] for e in entries if e["kind"] == "run" and e["seq"] > first and not e["body"].get("plan")
-                and e["body"]["instrument"] in used]
+                and not e["body"].get("reproduces") and e["body"]["instrument"] in used]
     looks = [{"look": e["id"], "reason": e["body"]["reason"],
               "used_by": next((r["id"] for r in entries if r["kind"] in ("run", "launch")
                                and r["body"].get("look") == e["id"]), None)}
@@ -228,7 +328,8 @@ def status(entries, name: str) -> dict:
     return {"plan": name, "id": p["id"], "version": p["body"]["version"], "question": p["body"]["question"],
             "amendments": [{"id": v["id"], "version": v["body"]["version"], "reason": v["body"]["reason"],
                             "because": v["body"]["because"]} for v in versions(entries, name)[1:]],
-            "hypotheses": hyps, "untagged_runs": untagged, "looks": looks}
+            "hypotheses": hyps, "untagged_runs": untagged, "looks": looks,
+            "continues": lineage(entries, name), "prior_trials": p["body"].get("prior_trials", {})}
 
 
 def claim_trials(entries, citations: list) -> list:
@@ -251,6 +352,7 @@ def claim_trials(entries, citations: list) -> list:
         verdict = next((e["body"]["outcome"] for e in reversed(entries) if e["kind"] == "verdict"
                         and e["body"]["name"] == name and e["body"]["hypothesis"] == h), None)
         out.append({"plan": name, "hypothesis": h, "trials": c["trials"], "reported": reported,
+                    **{k: c[k] for k in ("inherited", "declared") if c[k]},
                     **({"verdict": verdict} if verdict else {})})
     return out
 
@@ -272,6 +374,17 @@ def verify_entry(led, e: dict, seen: dict) -> None:
                 raise Refusal("it was recorded while a blocking finding on the version it replaces was unanswered")
         elif prev:
             raise Refusal(f"seals {b['name']} again instead of amending it")
+        else:
+            cont = b.get("continues", "")
+            if cont and seen.get(cont, {}).get("kind") != "plan":
+                raise Refusal(f"continues {cont}, which is not an earlier plan")
+            same = _same_question(earlier, b["question"], b["name"])
+            if same and not cont:
+                raise Refusal(f"seals the question of {same['body']['name']} again under a new name")
+            prior = b.get("prior_trials", {})
+            if prior and (not str(prior.get("from", "")).strip() or any(
+                    k != "from" and (k not in ids or not isinstance(v, int) or v < 0) for k, v in prior.items())):
+                raise Refusal("its prior_trials are not counts per hypothesis with where they were counted")
     elif e["kind"] == "look":
         if seen.get(b["plan"], {}).get("kind") != "plan":
             raise Refusal(f"looks at {b['plan']}, which is not an earlier plan")
@@ -291,3 +404,9 @@ def verify_entry(led, e: dict, seen: dict) -> None:
                 pass  # a launch's run carries the launch's look
             elif any(v["kind"] in ("run", "launch") and v["body"].get("look") == b["look"] for v in earlier):
                 raise Refusal(f"spends {b['look']} a second time")
+    elif b.get("look"):  # a reproduction spending a fresh look
+        lk = seen.get(b["look"])
+        if not lk or lk["kind"] != "look":
+            raise Refusal(f"spends {b['look']}, which is not an earlier look")
+        if any(v["kind"] in ("run", "launch") and v["body"].get("look") == b["look"] for v in earlier):
+            raise Refusal(f"spends {b['look']} a second time")

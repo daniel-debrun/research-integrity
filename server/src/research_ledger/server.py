@@ -46,7 +46,7 @@ def _entry(e: dict) -> dict:
 
 def build(root: str | os.PathLike | None = None) -> MCPServer:
     ledger = Ledger(root or os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")
-    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.1.3")
+    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.2.0")
 
     def reads(title):
         return ToolAnnotations(title=title, read_only_hint=True)
@@ -129,13 +129,37 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         does."""
         return _run(ref, args, True, plan, hypothesis, look)
 
+    @server.tool(annotations=appends("Reproduce a run", open_world_hint=True))
+    def reproduce_run(run: str, look: str = "") -> dict:
+        """Run a recorded run again (the same instrument version, the same args, the same way) and record whether
+        it came out the same: exit code and every declared output by sha256 decide, stdout stands in when nothing
+        is declared, stderr is shown but never decides. The rerun is recorded as a run marked `reproduces` and
+        counts as no trial. Refused for an instrument that acts or ran on a node, and for a run that spent a
+        holdout look unless `look` spends a new one. Answers with the verdict and the first differing line of each
+        output that differs."""
+        def go():
+            orig = ledger.get(run, "run")
+            e = ins.reproduce(ledger, run, pl.spend(ledger, look, orig) if look else None)
+            r = e["run"]
+            return {"ok": True, "id": e["id"], "of": e["body"]["of"], "by": r["id"], "verdict": e["body"]["verdict"],
+                    **{k: e["body"][k] for k in ("exit", "stdout", "stderr", "outputs")},
+                    "differences": e["differences"], "exit_code": r["body"]["exit"],
+                    "stdout_tail": r["stdout_tail"], "stderr_tail": r["stderr_tail"]}
+        return _safe(go)
+
     @server.tool(annotations=appends("Seal a plan"))
-    def seal_plan(name: str, question: str, hypotheses: list[dict], holdout: list[str] | None = None) -> dict:
+    def seal_plan(name: str, question: str, hypotheses: list[dict], holdout: list[str] | None = None,
+                  continues: str = "", prior_trials: dict | None = None) -> dict:
         """Record what a study will test before the runs it governs: the question, and hypotheses, each
         {"statement": what it claims, "metric": what is measured, "success": what counts as a result, "comparison":
         against what (optional)}, numbered H1, H2, ... `holdout` lists files the work must not look at until a
-        look_holdout; they are recorded by sha256. A sealed plan changes only by amend_plan."""
-        return _safe(lambda: _entry(pl.seal(ledger, name, question, hypotheses, holdout or [])))
+        look_holdout; they are recorded by sha256. A sealed plan changes only by amend_plan. A trial count belongs
+        to the question: sealing a question an earlier plan asks is refused unless `continues` names that plan (its
+        id), and then a hypothesis given one of its ids ("id": "H1") inherits that id's trials. In a fresh ledger,
+        `prior_trials` declares the trials counted elsewhere: {"from": that ledger's head hash, URL or path, "H1":
+        12, ...}; it is your word, recorded as such."""
+        return _safe(lambda: _entry(pl.seal(ledger, name, question, hypotheses, holdout or [], continues,
+                                            prior_trials)))
 
     @server.tool(annotations=appends("Amend a plan"))
     def amend_plan(name: str, reason: str, question: str = "", hypotheses: list[dict] | None = None,
@@ -148,9 +172,10 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
 
     @server.tool(annotations=reads("Plan status"))
     def plan_status(name: str) -> dict:
-        """A plan's trials: for each hypothesis, every run tagged to it (succeeded, failed, still running), how
-        many a claim reports, and the successful ones nothing reports; untagged runs of the same instruments since
-        the seal; its amendments and its holdout looks."""
+        """A plan's trials: for each hypothesis, every run tagged to it (succeeded, failed, still running), the
+        trials inherited from the plans it continues and declared from another ledger, how many a claim reports, and
+        the successful ones nothing reports; untagged runs of the same instruments since the seal; its amendments,
+        its lineage and its holdout looks."""
         return _safe(lambda: {"ok": True, **pl.status(ledger.entries(), name)})
 
     @server.tool(annotations=ToolAnnotations(title="Look at a holdout", read_only_hint=False, destructive_hint=True))
@@ -170,14 +195,17 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
     def claim(text: str, citations: list[str], supersedes: str = "") -> dict:
         """Record a statement resting on citations (their ids from cite or cite_run). Refused unless every number
         the statement writes is written in a quote it cites. `supersedes` replaces an earlier claim; refused while a
-        blocking finding on it is unanswered."""
+        blocking finding on it is unanswered. Answers with `wording` when the statement uses a word it should not
+        ("proves", "novel"); the claim is recorded all the same."""
         return _safe(lambda: _entry(ledger.claim(text, citations, supersedes)))
 
     @server.tool(annotations=appends("Record a draft", idempotent_hint=True))
     def record_draft(path: str, supersedes: str = "") -> dict:
         """Record a text file (an issue, a report, a plan, a paper) as a draft version, so a critique can target
         exactly that text. `supersedes` makes it the revision of an earlier version, refused until every blocking
-        finding on that version is answered. Lists the numbers in it that no citation's quote writes."""
+        finding on that version is answered. Lists the numbers in it that no citation's quote writes, and its
+        `wording` to check: "novel", "proves" and the like, each with its line and whether it is inside a quote (then
+        it is someone else's word). Listed, not refused; a reviewer makes a finding of each unquoted one."""
         return _safe(lambda: _entry(cq.record_draft(ledger, path, supersedes)))
 
     @server.tool(annotations=appends("Record a critique"))
@@ -206,13 +234,14 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         """Recheck the whole ledger: every hash and link in the chain, every stored page, every citation's quote on
         its page, every claim's numbers in its quotes. Sources whose files are still there are read again and each
         citation rechecked against the document itself; `unread` lists those that could not be (URLs, moved files).
-        Instruments' code and runs' stored outputs are checked against their hashes; runs are not run again."""
+        Instruments' code and runs' stored outputs are checked against their hashes, and each reproduction's
+        comparison is recomputed from them; nothing is run again here (reproduce_run does that)."""
         return _safe(ledger.verify)
 
     @server.tool(annotations=reads("List the ledger"))
     def list_entries(kind: str = "") -> dict:
-        """The ledger's entries, oldest first, or one kind: source, instrument, run, citation, claim, draft,
-        critique, answer, node, launch."""
+        """The ledger's entries, oldest first, or one kind: source, instrument, run, reproduction, citation, claim,
+        draft, critique, answer, node, launch, plan, look, model, verdict."""
         rows = [_entry(e) for e in ledger.entries() if not kind or e["kind"] == kind]
         return {"ok": True, "ledger": str(ledger.root), "entries": rows}
 
