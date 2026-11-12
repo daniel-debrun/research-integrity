@@ -142,3 +142,26 @@ def test_decisions_need_a_registered_subject_and_name_what_they_replace(led):
 def test_a_decision_rests_on_entries_that_exist(led):
     with pytest.raises(Refusal, match="is not an entry"):
         mem.decide(led, "a.b", "q", "c", "r", evidence=["claim:000000000000"], new_subject=True)
+
+
+def test_the_digest_block_is_replaced_and_nothing_else_touched(led, tmp_path):
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text("# Rules\nBe brief.\n")
+    mem.decide(led, "firm.status", "Keep the firm?", "close it", "no client", new_subject=True)
+    mem.write_digest(led, str(agents))
+    d1 = mem.decide(led, "release.split", "Split?", "0.2.1 then 0.3.0", "bench", new_subject=True)
+    mem.write_digest(led, str(agents))
+    text = agents.read_text()
+    assert text.startswith("# Rules\nBe brief.\n") and text.count(mem.BEGIN) == 1
+    assert "release.split: 0.2.1 then 0.3.0" in text
+    with pytest.raises(Refusal, match="not a markdown file"):
+        mem.write_digest(led, str(tmp_path / "x.txt"))
+
+
+def test_the_session_start_digest_prints_decisions(led, tmp_path, monkeypatch, capsys):
+    from research_ledger import server
+    mem.decide(led, "firm.status", "Keep the firm?", "close it", "no client", new_subject=True)
+    monkeypatch.setenv("LEDGER_DIR", str(led.root))
+    monkeypatch.setattr("sys.argv", ["research-ledger", "--digest"])
+    server.main()
+    assert "firm.status: close it" in capsys.readouterr().out

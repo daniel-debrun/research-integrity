@@ -438,3 +438,26 @@ def digest(led, days: int = 14) -> str:
         lines.append("Facts that no longer hold:")
         lines += [f"- {s['statement']} [{s['state']}]" for s in stale[:20]]
     return "\n".join(lines)
+
+
+BEGIN, END = "<!-- research-ledger digest: written by write_digest, edits inside are replaced -->", \
+    "<!-- /research-ledger digest -->"
+
+
+def write_digest(led, path: str, days: int = 14) -> dict:
+    """Write the digest into a marked block of a markdown file (AGENTS.md, GEMINI.md), replacing the block if it is
+    there and touching nothing outside it."""
+    target = guard.check(path)
+    if target.suffix.lower() != ".md":
+        raise Refusal(f"{path} is not a markdown file", "the digest goes into an agent's instruction file",
+                      "give AGENTS.md, GEMINI.md or another .md file")
+    text = digest(led, days) or "No decisions or stale facts recorded."
+    block = f"{BEGIN}\n{text}\n{END}"
+    old = target.read_text(encoding="utf-8") if target.is_file() else ""
+    if BEGIN in old and END in old:
+        head, rest = old.split(BEGIN, 1)
+        new = head + block + rest.split(END, 1)[1]
+    else:
+        new = old + ("\n\n" if old and not old.endswith("\n\n") else "") + block + "\n"
+    target.write_text(new, encoding="utf-8")
+    return {"ok": True, "path": str(target), "lines": text.count("\n") + 1}

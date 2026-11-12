@@ -8,7 +8,7 @@ from mcp.client.client import Client
 from research_ledger import compute_server
 from research_ledger.server import build
 
-TOOLS = {"anchor_ledger", "record_fact", "recall", "decide", "list_subjects", "list_decisions", "add_source", "read_page", "cite", "claim", "verify", "list_entries", "register_instrument", "reproduce_run",
+TOOLS = {"anchor_ledger", "write_digest", "record_fact", "recall", "decide", "list_subjects", "list_decisions", "add_source", "read_page", "cite", "claim", "verify", "list_entries", "register_instrument", "reproduce_run",
          "run_instrument", "run_acting_instrument", "cite_run", "record_draft", "record_critique", "answer_finding",
          "list_findings", "seal_plan", "amend_plan", "plan_status", "look_holdout"}
 COMPUTE = {"list_nodes", "register_node", "register_instrument_on", "launch_instrument", "wait_run", "run_logs",
@@ -36,7 +36,7 @@ def test_every_tool_is_annotated_for_the_directory(tmp_path):
         assert t.annotations.title and t.annotations.read_only_hint is not None, t.name
         assert t.annotations.read_only_hint or t.annotations.destructive_hint is not None, t.name
     assert {t.name for t in tools if t.annotations.idempotent_hint} == {"add_source", "register_instrument",
-                                                                          "record_draft"}
+                                                                          "record_draft", "write_digest"}
     assert {t.name for t in tools if t.annotations.destructive_hint} == {"run_acting_instrument", "look_holdout"}
 
 

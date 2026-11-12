@@ -276,6 +276,14 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         replacement."""
         return _safe(lambda: {"ok": True, **mem.list_decisions(ledger.entries(), current_only, days)})
 
+    @server.tool(annotations=appends("Write the digest", idempotent_hint=True))
+    def write_digest(path: str, days: int = 14) -> dict:
+        """Write current decisions, recent supersessions and stale facts into a marked block of a markdown file, for
+        agents that read an instruction file (AGENTS.md for Codex, GEMINI.md for Gemini CLI) instead of the
+        session-start digest. Only the block is replaced; nothing else in the file is touched. Runs only when
+        called."""
+        return _safe(lambda: mem.write_digest(ledger, path, days))
+
     @server.tool(annotations=reads("Verify the ledger"))
     def verify(anchor: str = "") -> dict:
         """Recheck the whole ledger: every hash and link in the chain, every stored page, every citation's quote on
@@ -304,6 +312,19 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
 
 
 def main() -> None:
+    import sys
+    args = sys.argv[1:]
+    if args[:1] == ["--digest"]:  # the session-start hook: what is decided and what no longer holds
+        root = Path(os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")
+        if (root / "chain.jsonl").exists():
+            text = mem.digest(Ledger(root))
+            if text:
+                print(text)
+        return
+    if args[:1] == ["--write-digest"] and len(args) == 2:
+        root = Path(os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")
+        print(_safe(lambda: mem.write_digest(Ledger(root), args[1])))
+        return
     build().run("stdio")
 
 
