@@ -15,6 +15,7 @@ from mcp.types import ToolAnnotations
 from . import critique as cq
 from . import instruments as ins
 from . import memory as mem
+from . import report as rp
 from . import meta as mt
 from . import search as sr
 from . import plans as pl
@@ -310,6 +311,15 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         session-start digest. Only the block is replaced; nothing else in the file is touched. Runs only when
         called."""
         return _safe(lambda: mem.write_digest(ledger, path, days))
+
+    @server.tool(annotations=appends("Check a report"))
+    def check_report(path_or_text: str, cwd: str = "") -> dict:
+        """Check every path, commit, branch, tag, version and test count an agent's report states, against the
+        machine: confirmed, contradicted (with what is there), missing, refused, ambiguous or uncheckable. Run it on
+        a subagent's hand-back before relying on it. A version is checked against what is installed when the
+        sentence says installed, enabled or running; against the repository's manifests when it says declares, in
+        the repo or bumped; otherwise against both. The result is recorded with the report's sha256."""
+        return _safe(lambda: {"ok": True, **rp.check_report(ledger, path_or_text, cwd)})
 
     @server.tool(annotations=reads("Verify the ledger"))
     def verify(anchor: str = "") -> dict:

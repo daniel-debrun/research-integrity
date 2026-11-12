@@ -375,7 +375,7 @@ class Ledger:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
         kinds = ("source", "instrument", "run", "reproduction", "citation", "claim", "draft", "critique", "answer",
-                 "node", "launch", "plan", "look", "model", "verdict", "fact", "decision", "meta")
+                 "node", "launch", "plan", "look", "model", "verdict", "fact", "decision", "meta", "report")
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]

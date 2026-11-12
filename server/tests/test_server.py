@@ -8,7 +8,7 @@ from mcp.client.client import Client
 from research_ledger import compute_server
 from research_ledger.server import build
 
-TOOLS = {"anchor_ledger", "annotate_source", "search_sources", "write_digest", "record_fact", "recall", "decide", "list_subjects", "list_decisions", "add_source", "read_page", "cite", "claim", "verify", "list_entries", "register_instrument", "reproduce_run",
+TOOLS = {"anchor_ledger", "check_report", "annotate_source", "search_sources", "write_digest", "record_fact", "recall", "decide", "list_subjects", "list_decisions", "add_source", "read_page", "cite", "claim", "verify", "list_entries", "register_instrument", "reproduce_run",
          "run_instrument", "run_acting_instrument", "cite_run", "record_draft", "record_critique", "answer_finding",
          "list_findings", "seal_plan", "amend_plan", "plan_status", "look_holdout"}
 COMPUTE = {"list_nodes", "register_node", "register_instrument_on", "launch_instrument", "wait_run", "run_logs",
