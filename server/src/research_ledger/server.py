@@ -15,6 +15,7 @@ from mcp.types import ToolAnnotations
 from . import critique as cq
 from . import instruments as ins
 from . import memory as mem
+from . import meta as mt
 from . import search as sr
 from . import plans as pl
 from .ledger import Ledger
@@ -57,11 +58,27 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         return ToolAnnotations(title=title, read_only_hint=False, destructive_hint=False, **kw)
 
     @server.tool(annotations=appends("Add a source", idempotent_hint=True, open_world_hint=True))
-    def add_source(path_or_url: str) -> dict:
+    def add_source(path_or_url: str, source_type: str = "", doi: str = "") -> dict:
         """Record a document: a local PDF or text file, or an http(s) URL to one (fetched once). Its page texts are
         stored, so every later quote is checked against exactly what was read. The same bytes again return the
-        existing source."""
-        return _safe(lambda: _entry(ledger.add_source(path_or_url)))
+        existing source. `source_type` is primary, paper, vendor, secondary or aggregator (vendor and aggregator
+        pages go stale after 90 days). `doi` asks Crossref for retraction and correction notices on it."""
+        def go():
+            e = ledger.add_source(path_or_url)
+            out = _entry(e)
+            if source_type or doi:
+                m = mt.annotate(ledger, e["id"], source_type, None, doi)
+                out["meta"] = m["body"]
+            return out
+        return _safe(go)
+
+    @server.tool(annotations=appends("Annotate a source", open_world_hint=True))
+    def annotate_source(source: str, source_type: str = "", stale_after_days: int | None = None,
+                        doi: str = "") -> dict:
+        """Give a recorded source its type (primary, paper, vendor, secondary, aggregator), a freshness window in
+        days, or a DOI to check at Crossref for retraction and correction notices. Recorded as a new entry; the
+        source itself is never rewritten."""
+        return _safe(lambda: _entry(mt.annotate(ledger, source, source_type, stale_after_days, doi)))
 
     @server.tool(annotations=reads("Read a page"))
     def read_page(source: str, page: int, layout: bool = False) -> dict:
@@ -205,12 +222,14 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         return _safe(lambda: _entry(ledger.cite_run(run, quote, numbers or [], file, casefold)))
 
     @server.tool(annotations=appends("Make a claim"))
-    def claim(text: str, citations: list[str], supersedes: str = "") -> dict:
+    def claim(text: str, citations: list[str], supersedes: str = "", subject: str = "") -> dict:
         """Record a statement resting on citations (their ids from cite or cite_run). Refused unless every number
         the statement writes is one its citations were cited for (a label's number, such as Table 4, aside). `supersedes` replaces an earlier claim; refused while a
         blocking finding on it is unanswered. Answers with `wording` when the statement uses a word it should not
-        ("proves", "novel"); the claim is recorded all the same."""
-        return _safe(lambda: _entry(ledger.claim(text, citations, supersedes)))
+        ("proves", "novel"); the claim is recorded all the same. `subject` keys what the claim is about
+        (highbyte.price.per-site-year): standing claims on one subject that write different numbers come back as
+        `conflicts`; the ledger reports them and does not choose."""
+        return _safe(lambda: _entry(ledger.claim(text, citations, supersedes, subject)))
 
     @server.tool(annotations=appends("Record a draft", idempotent_hint=True))
     def record_draft(path: str, supersedes: str = "") -> dict:

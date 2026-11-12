@@ -40,6 +40,7 @@ from . import formal as fm
 from . import guard
 from . import instruments as ins
 from . import memory as mem
+from . import meta as mt
 from . import search as sr
 from . import plans as pl
 from . import quotecheck as qc
@@ -83,6 +84,21 @@ def claim_backing(citations: list, rules: int) -> set:
     if rules >= 2:
         return {qc.as_number(n) for c in citations for n in c["body"]["numbers"]}
     return set().union(*(qc.numbers(c["body"]["quote"]) for c in citations))
+
+
+def conflicts(entries) -> list:
+    """Standing claims on one subject that write different numbers. Reported, never resolved."""
+    replaced = {e["body"].get("supersedes") for e in entries if e["kind"] == "claim"} - {"", None}
+    by = {}
+    for e in entries:
+        if e["kind"] == "claim" and e["id"] not in replaced and e["body"].get("subject"):
+            by.setdefault(e["body"]["subject"], []).append(e)
+    out = []
+    for s, cl in by.items():
+        vals = {c["id"]: sorted(str(n) for n in qc.claim_numbers(c["body"]["text"])) for c in cl}
+        if len({tuple(v) for v in vals.values() if v}) > 1:
+            out.append({"subject": s, "claims": list(vals), "numbers": vals})
+    return out
 
 
 class Ledger:
@@ -201,7 +217,7 @@ class Ledger:
         return self._append("citation", {"run": r["id"], "file": file, "quote": quote, "numbers": out["numbers"],
                                          "rules": RULES, **({"casefold": True} if casefold else {})})
 
-    def claim(self, text: str, citations: list, supersedes: str = "") -> dict:
+    def claim(self, text: str, citations: list, supersedes: str = "", subject: str = "") -> dict:
         """Record a statement resting on citations, refused unless every number it writes is written in a quote
         it cites. `supersedes` replaces an earlier claim, refused while a blocking finding on it is unanswered."""
         if not text.strip():
@@ -217,6 +233,9 @@ class Ledger:
                           "made for; a number that only happens to be in a quote is not checked against the page",
                           "cite the passage with that number in `numbers`, write it as the quote does, or drop it")
         body = {"text": text, "citations": [c["id"] for c in cited], "rules": RULES}
+        subject = pl.subject_key(subject)
+        if subject:
+            body["subject"] = subject
         trials = pl.claim_trials(self.entries(), cited)
         if trials:
             body["trials"] = trials
@@ -226,7 +245,8 @@ class Ledger:
             body["supersedes"] = old["id"]
         e = self._append("claim", body)
         words = cq.wording(text)
-        return {**e, "wording": words} if words else e
+        clash = [c for c in conflicts(self.entries()) if e["id"] in c["claims"]]
+        return {**e, **({"wording": words} if words else {}), **({"conflicts": clash} if clash else {})}
 
     def anchor(self, path: str) -> dict:
         """Write the chain's head (its length and last hash) to a file outside the ledger, one line per anchor.
@@ -316,6 +336,8 @@ class Ledger:
                     pl.verify_entry(self, e, seen)
                 elif e["kind"] in ("model", "verdict"):
                     fm.verify_entry(self, e, seen)
+                elif e["kind"] == "meta":
+                    mt.verify_entry(self, e, seen)
                 elif e["kind"] in ("fact", "decision"):
                     mem.verify_entry(self, e, seen)
                 elif e["kind"] in ("draft", "critique", "answer"):
@@ -353,7 +375,7 @@ class Ledger:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
         kinds = ("source", "instrument", "run", "reproduction", "citation", "claim", "draft", "critique", "answer",
-                 "node", "launch", "plan", "look", "model", "verdict", "fact", "decision")
+                 "node", "launch", "plan", "look", "model", "verdict", "fact", "decision", "meta")
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]
@@ -366,6 +388,9 @@ class Ledger:
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
                 "problems": problems, **({"warnings": [warn]} if warn else {}),
                 "stale_facts": mem.stale_facts(self, list(seen.values())),
+                "conflicts": conflicts(list(seen.values())),
+                "source_notices": [w for w in mt.claim_warnings(list(seen.values())) if any("notice" in x
+                                                                                          for x in w["why"])],
                 "changed_sources": {"citations": len(moved), "same": sum(m["state"] == "same" for m in moved),
                                     "moved": [m for m in moved if m["state"] == "moved"],
                                     "gone": [m for m in moved if m["state"] == "gone"]} if moved else {}, "unread": unread, "open_findings": review["open_findings"],

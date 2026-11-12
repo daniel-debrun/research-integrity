@@ -97,6 +97,28 @@ def gate(entries, target: str) -> None:
                       f"revise {later['id']} instead")
 
 
+def grounding(entries, text: str) -> dict:
+    """Each line of a draft that writes a number, against the standing claims: the lines whose every number some
+    claim writes, and the lines with numbers no claim writes. Numbers by value, a label's number aside."""
+    replaced = {e["body"].get("supersedes") for e in entries if e["kind"] == "claim"} - {"", None}
+    claims = [e for e in entries if e["kind"] == "claim" and e["id"] not in replaced]
+    by_number = {}
+    for c in claims:
+        for n in qc.claim_numbers(c["body"]["text"]):
+            by_number.setdefault(n, []).append(c["id"])
+    grounded, unclaimed = 0, []
+    for i, line in enumerate(text.splitlines(), 1):
+        nums = qc.claim_numbers(line)
+        if not nums:
+            continue
+        loose = sorted(n for n in nums if n not in by_number)
+        if loose:
+            unclaimed.append({"line": i, "text": line.strip()[:200], "numbers": [str(n) for n in loose]})
+        else:
+            grounded += 1
+    return {"grounded_lines": grounded, "unclaimed_lines": unclaimed}
+
+
 def record_draft(led, path: str, supersedes: str = "") -> dict:
     """Record a file's text as a draft version, the numbers in it that no citation's quote writes, and its wording
     to check (see `wording`)."""
@@ -119,7 +141,8 @@ def record_draft(led, path: str, supersedes: str = "") -> dict:
                            if e["kind"] == "citation" and e["body"].get("source") not in drafts))
     untraced = sorted(qc.claim_numbers(text) - quoted)
     if known and (not supersedes or known["body"]["supersedes"] == supersedes):
-        return {**known, "already": True, "untraced_numbers": [str(n) for n in untraced], "wording": wording(text)}
+        return {**known, "already": True, "untraced_numbers": [str(n) for n in untraced], "wording": wording(text),
+                **_checks(entries, text)}
     old = None
     if supersedes:
         old = led.get(supersedes, "draft")
@@ -132,7 +155,17 @@ def record_draft(led, path: str, supersedes: str = "") -> dict:
     body = {"path": str(path), "sha256": sha, "text": led._put_blob(data),
             "version": old["body"]["version"] + 1 if old else 1, "supersedes": old["id"] if old else "",
             "answered": answered}
-    return {**led._append("draft", body), "untraced_numbers": [str(n) for n in untraced], "wording": wording(text)}
+    return {**led._append("draft", body), "untraced_numbers": [str(n) for n in untraced], "wording": wording(text),
+            **_checks(entries, text)}
+
+
+def _checks(entries, text: str) -> dict:
+    from . import ledger as lg
+    from . import meta as mt
+    out = grounding(entries, text)
+    warn = mt.claim_warnings(entries)
+    clash = lg.conflicts(entries)
+    return {**out, **({"claim_warnings": warn} if warn else {}), **({"conflicts": clash} if clash else {})}
 
 
 def _evidence(led, ids, after: int = -1) -> list:
