@@ -30,12 +30,13 @@ from pathlib import Path
 from .quotecheck import Refusal
 
 TAGS = ("plan", "hypothesis", "look")
-#: a subject key, such as `loss.ablation` or `firm.status`: lowercase letters, digits, dots and hyphens
+#: a subject key, such as `loss.ablation` or `firm.status`: lowercase letters, digits, dots and hyphens. An
+#: underscore is read as a hyphen, so `experiment_results` and `experiment-results` are one subject.
 SUBJECT = re.compile(r"[a-z0-9][a-z0-9.-]{0,79}")
 
 
 def subject_key(subject: str) -> str:
-    s = subject.strip()
+    s = subject.strip().replace("_", "-")
     if s and not SUBJECT.fullmatch(s):
         raise Refusal(f"`{subject}` is not a subject key", "lowercase letters, digits, dots and hyphens, such as "
                       "loss.ablation", "write it as a key")

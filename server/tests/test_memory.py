@@ -165,3 +165,19 @@ def test_the_session_start_digest_prints_decisions(led, tmp_path, monkeypatch, c
     monkeypatch.setattr("sys.argv", ["research-ledger", "--digest"])
     server.main()
     assert "firm.status: close it" in capsys.readouterr().out
+
+
+def test_the_session_start_hook_names_record_fact_and_write_digest_even_with_no_ledger(tmp_path, monkeypatch, capsys):
+    from research_ledger import server
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "none"))
+    monkeypatch.setattr("sys.argv", ["research-ledger", "--digest"])
+    server.main()
+    out = capsys.readouterr().out
+    assert "record_fact" in out and "write_digest" in out
+
+
+def test_an_underscore_in_a_subject_key_is_read_as_a_hyphen(led):
+    d = mem.decide(led, "storage.experiment_results", "Where?", "SQLite", "no server", new_subject=True)
+    assert d["body"]["subject"] == "storage.experiment-results"
+    with pytest.raises(Refusal):
+        mem.decide(led, "storage.experiment-results", "Where?", "Postgres", "writers", new_subject=True)
