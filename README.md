@@ -4,7 +4,8 @@
 
 When an AI agent writes "the paper reports 0.61", nothing usually checks that the paper does. This plugin makes
 that check mechanical. A quote is recorded only if it is on the page it cites and writes every number it is cited
-for. A claim is recorded only on recorded quotes, and only if every number it writes is written in one of them.
+for, without cutting a longer number on the page ("0.6" from "0.61"). A claim is recorded only on recorded quotes,
+and only if every number it writes is one they were cited for.
 A number measured by a program rests on that program's recorded output in the same way: the program is registered
 as an instrument, one exact version of its code and environment, and every run of it is recorded. Each record goes
 into a hash-chained ledger in the project (`.ledger/`) that anyone can recheck. The checks are code, not a
@@ -123,7 +124,8 @@ before each look.
 
 A trial count belongs to the question, not to the plan's name or the folder. `seal_plan` refuses a question that an
 earlier plan already asks (compared without case, spacing or final punctuation) unless the new plan `continues` that
-plan by id; then a hypothesis given one of the earlier plan's ids inherits that id's trials, and `plan_status` shows
+plan by id. A plan sealed with a `subject` key (`loss.ablation`) is caught on that key as well, however its question
+is worded. Then a hypothesis given one of the earlier plan's ids inherits that id's trials, and `plan_status` shows
 the lineage and the `inherited` count. A plan started in a fresh ledger, say one made for a publication, declares the
 trials counted elsewhere as `prior_trials`, with where they were counted (a ledger head hash, a URL, a path); they are
 counted as `declared` and a claim's count says so ("rests on 1 of 40 trials, 28 declared"). A declaration is the
@@ -151,18 +153,25 @@ blocking findings still open, and each persona's record: findings upheld, dismis
 
 Entries are not signed, and nothing here asks you to approve anything: when to ask you is left to the agent's own
 mode (in auto mode, nothing is asked). The chain shows that the ledger was changed after the fact. To fix its state
-at a point in time, commit `.ledger/` with the work it backs.
+at a point in time, commit `.ledger/` with the work it backs, or write its head to a file outside it with
+`anchor_ledger` and keep that file elsewhere: `verify(anchor=...)` then shows an entry removed from the end or a
+chain rewritten whole, which the chain alone cannot.
+
+Each entry records the rules it was checked under (`rules`), and `verify` rechecks it under those rules, so a ledger
+written by an older version stays valid. Rules 2 (v0.2.1) added the number-edge check on quotes, `casefold` on
+citations, and claims resting on their citations' cited numbers.
 
 ## What the checks don't catch
 
 - **Page texts written by hand, for an `unread` source.** Without the document, `verify` can only check the folder
   against itself, and a ledger whose pages and hashes were all rewritten agrees with itself. Keep the documents
   where they were recorded from. URLs are not fetched again, so download a document you rely on and record the file.
-- **A number from the wrong place.** Numbers are matched by value. A claim can take a number from a quote that is
-  about something else.
+- **A number from the wrong place.** Numbers are matched by value. A claim can cite a quote that writes the right
+  value for a different quantity (0.61 for one method, when the claim is about another).
 - **Statements without numbers.** "The method beats the baseline" is recorded on any citation. Only the citation is
   checked.
-- **Numbers in labels.** "Table 2" or a year in a claim counts as a number, so it has to be in a cited quote too.
+- **Years and dates.** A label's number (Table 2, Figure 3a, Section 4.1, Eq. 5, § 2) is not checked, but a year
+  is, so it has to be among a citation's numbers too.
 - **A rigged instrument.** An instrument that prints a number it was given, rather than measuring it, is recorded
   like any other. What the ledger gives you is the path from a claim to the run to the exact code that printed it.
 - **Runs outside the ledger.** The agent can run a program directly. That run isn't recorded, so no claim can rest
@@ -193,7 +202,8 @@ at a point in time, commit `.ledger/` with the work it backs.
 
 - **Reads**: the files you pass to `add_source` and `record_draft`, and the code folder you pass to
   `register_instrument`.
-- **Writes**: only inside the ledger folder (`./.ledger`, or `$LEDGER_DIR`).
+- **Writes**: only inside the ledger folder (`./.ledger`, or `$LEDGER_DIR`), and to the anchor file you name
+  for `anchor_ledger`.
 - **Runs**: the instruments you register, when a run tool is called. They do whatever their code does, including
   network access; the server adds none of its own.
 - **Network**: the server itself has one destination. `add_source` fetches a URL you give it, one GET to that URL
