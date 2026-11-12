@@ -270,7 +270,9 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         least 4 characters, never cut inside a word or number), field (target: a JSON or TOML file, `key`: dotted,
         such as project.version; keys naming secrets are refused), git_ref (target: a repository, `ref`, optional
         `ancestor_of`), run (target: a cite_run citation id). `expect` refuses the fact if the probe sees otherwise.
-        The fact's statement is written from what the probe saw; `note` is kept, marked unchecked."""
+        The fact's statement is written from what the probe saw; `note` is kept, marked unchecked. When asked to
+        remember something a probe can see (a version, a config value, a file, a commit), record it here rather than
+        in a memory note: a note is never checked again, a fact is checked on every recall."""
         return _safe(lambda: _entry(mem.record_fact(ledger, probe, target, expect, note, text, key, ref, ancestor_of,
                                                     casefold)))
 
@@ -309,7 +311,8 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         """Write current decisions, recent supersessions and stale facts into a marked block of a markdown file, for
         agents that read an instruction file (AGENTS.md for Codex, GEMINI.md for Gemini CLI) instead of the
         session-start digest. Only the block is replaced; nothing else in the file is touched. Runs only when
-        called."""
+        called. Use it rather than copying decisions into the file by hand: a hand-written copy has no markers, so
+        the next write_digest can't replace it and it goes stale."""
         return _safe(lambda: mem.write_digest(ledger, path, days))
 
     @server.tool(annotations=appends("Check a report"))
@@ -357,6 +360,7 @@ def main() -> None:
             text = mem.digest(Ledger(root))
             if text:
                 print(text)
+        print(mem.USAGE)
         return
     if args[:1] == ["--write-digest"] and len(args) == 2:
         root = Path(os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")

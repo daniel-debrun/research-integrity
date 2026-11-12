@@ -440,6 +440,12 @@ def digest(led, days: int = 14) -> str:
     return "\n".join(lines)
 
 
+#: printed by the session-start hook in every session, ledger or not: the two places an agent's own habits win
+USAGE = ("research-ledger: to remember something a probe can check (a version, a config value, a file, a commit) "
+         "for later sessions, use record_fact, not a memory note, and recall it before relying on it. To put "
+         "decisions into AGENTS.md or GEMINI.md, use write_digest, not a hand-written copy.")
+
+
 BEGIN, END = "<!-- research-ledger digest: written by write_digest, edits inside are replaced -->", \
     "<!-- /research-ledger digest -->"
 

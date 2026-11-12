@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Remember facts about the machine and decisions about the work so that a later session, or another agent, can rely on them without being told again, and check a hand-back's file and version claims when they matter. Use when you learn something that will matter later (a version, a commit, a path, a measured count), when a decision is made or reversed, at the start of work that depends on earlier decisions.
+description: Remember facts about the machine and decisions about the work so that a later session, or another agent, can rely on them without being told again, and check a hand-back's file and version claims when they matter. Use whenever you are asked to remember, note or keep something for later that a file, a config value or git can confirm (a version, a commit, a path, a measured count) — prefer it to a memory note, which is never checked again — when a decision is made or reversed, when decisions should go into AGENTS.md or GEMINI.md, and at the start of work that depends on earlier decisions.
 license: Apache-2.0
 compatibility: Needs the research-ledger MCP server (research-integrity 0.3 or later).
 ---
@@ -12,7 +12,8 @@ code.
 
 ## Facts: probed when written, probed again when recalled
 
-Record a fact with `record_fact`, naming a probe and its target. The server runs the probe and writes the fact's
+When you are asked to remember something a probe can see, record it as a fact, not a memory note: a note is
+never checked again. Record a fact with `record_fact`, naming a probe and its target. The server runs the probe and writes the fact's
 statement from what it saw; you never supply the value.
 
 | Probe | Use for | Example |
@@ -33,12 +34,14 @@ the same file.
 ## Decisions: one per subject, each naming what it replaced
 
 Record a decision with `decide(subject, question, choice, reason, evidence)`. The subject is a key such as
-`firm.status` or `release.split`. Call `list_subjects` first and use an existing subject when one fits; the refusal
+`firm.status` or `release.split` (an underscore is read as a hyphen). Call `list_subjects` first and use an existing subject when one fits; the refusal
 for a new one lists the subjects that look like it. Only pass `new_subject=true` for a question no subject covers.
 
 Reversing a decision is a new decision that `supersedes` the standing one, with the reason it changed. The current
 decisions and recent reversals are printed at the start of each session. For agents that read an instruction file
-instead (Codex, Gemini CLI), `write_digest("AGENTS.md")` writes them into a marked block; run it after deciding.
+instead (Codex, Gemini CLI), `write_digest("AGENTS.md")` writes them into a marked block; run it after deciding. Never copy
+decisions into such a file by hand: a copy without the markers is not replaced by the next `write_digest`, so it
+goes stale.
 
 A decision does not update documents that describe the old one. When you supersede a decision, find those documents
 and fix them, or say which still need it.
