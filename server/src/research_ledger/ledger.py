@@ -51,6 +51,10 @@ except ImportError:  # Windows
         msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
 
 GENESIS = "0" * 64
+#: The checks an entry was recorded under. 1: v0.2.0. 2: a quote may not cut a number on its page, a citation may
+#: casefold, and a claim's numbers (labels aside) must be among the numbers its citations are cited for. `verify`
+#: rechecks every entry under the rules it was recorded with.
+RULES = 2
 USER_AGENT = "research-ledger/0.1 (citation check)"
 
 
@@ -60,6 +64,19 @@ def canonical(obj) -> bytes:
 
 def entry_hash(seq: int, kind: str, at: str, body: dict, prev: str) -> str:
     return hashlib.sha256(canonical({"seq": seq, "kind": kind, "at": at, "body": body, "prev": prev})).hexdigest()
+
+
+def _how(body: dict) -> tuple:
+    """How a citation's quote is rechecked: (casefold, edges), by the rules it was recorded under."""
+    return bool(body.get("casefold")), body.get("rules", 1) >= 2
+
+
+def claim_backing(citations: list, rules: int) -> set:
+    """The numbers a claim's citations back: under rules 1, every number their quotes write; under rules 2, the
+    numbers each was cited for."""
+    if rules >= 2:
+        return {qc.as_number(n) for c in citations for n in c["body"]["numbers"]}
+    return set().union(*(qc.numbers(c["body"]["quote"]) for c in citations))
 
 
 class Ledger:
@@ -160,19 +177,22 @@ class Ledger:
                 "layout": len(forms) > 1}
         return self._append("source", body)
 
-    def cite(self, source: str, page: int, quote: str, cited_numbers=()) -> dict:
-        """Record a quote on one page of a source, refused unless it is on that page and writes every number."""
+    def cite(self, source: str, page: int, quote: str, cited_numbers=(), casefold: bool = False) -> dict:
+        """Record a quote on one page of a source, refused unless it is on that page (not cutting a number the page
+        writes) and writes every number. `casefold` matches letters regardless of case."""
         src = self.get(source)
-        out = qc.check(self.forms(source), page, quote, cited_numbers)
-        body = {"source": src["id"], "page": page, "quote": quote, "numbers": out["numbers"]}
+        out = qc.check(self.forms(source), page, quote, cited_numbers, casefold)
+        body = {"source": src["id"], "page": page, "quote": quote, "numbers": out["numbers"], "rules": RULES,
+                **({"casefold": True} if casefold else {})}
         return self._append("citation", body)
 
-    def cite_run(self, run: str, quote: str, cited_numbers=(), file: str = "stdout") -> dict:
+    def cite_run(self, run: str, quote: str, cited_numbers=(), file: str = "stdout", casefold: bool = False) -> dict:
         """Record a quote from a run's output (its stdout, its stderr or a text output), refused unless it is
         there and writes every number."""
         r = self.get(run, "run")
-        out = qc.check([[ins.output_text(self, r, file)]], 1, quote, cited_numbers)
-        return self._append("citation", {"run": r["id"], "file": file, "quote": quote, "numbers": out["numbers"]})
+        out = qc.check([[ins.output_text(self, r, file)]], 1, quote, cited_numbers, casefold)
+        return self._append("citation", {"run": r["id"], "file": file, "quote": quote, "numbers": out["numbers"],
+                                         "rules": RULES, **({"casefold": True} if casefold else {})})
 
     def claim(self, text: str, citations: list, supersedes: str = "") -> dict:
         """Record a statement resting on citations, refused unless every number it writes is written in a quote
@@ -183,13 +203,13 @@ class Ledger:
             raise Refusal("a claim rests on at least one citation", "a statement with no quote behind it is not "
                           "recorded", "cite the passage it rests on first, then claim with the citation's id")
         cited = [self.get(c, "citation") for c in citations]
-        written = set().union(*(qc.numbers(c["body"]["quote"]) for c in cited))
-        loose = sorted(qc.numbers(text) - written)
+        loose = sorted(qc.claim_numbers(text) - claim_backing(cited, RULES))
         if loose:
-            raise Refusal(f"{loose[0]} is not written in any quote the claim cites",
-                          "every number a claim writes is one its quotes write",
-                          "cite the passage that states it, write it as the quote does, or drop it from the claim")
-        body = {"text": text, "citations": [c["id"] for c in cited]}
+            raise Refusal(f"{loose[0]} is not a number any citation of the claim is cited for",
+                          "every number a claim writes (a label's, such as Table 4, aside) is one its citations were "
+                          "made for; a number that only happens to be in a quote is not checked against the page",
+                          "cite the passage with that number in `numbers`, write it as the quote does, or drop it")
+        body = {"text": text, "citations": [c["id"] for c in cited], "rules": RULES}
         trials = pl.claim_trials(self.entries(), cited)
         if trials:
             body["trials"] = trials
@@ -255,22 +275,24 @@ class Ledger:
                 elif e["kind"] == "citation" and "run" in b:
                     if seen.get(b["run"], {}).get("kind") != "run":
                         raise Refusal(f"cites {b['run']}, which is not an earlier run")
-                    qc.check([[ins.output_text(self, seen[b["run"]], b["file"])]], 1, b["quote"], b["numbers"])
+                    qc.check([[ins.output_text(self, seen[b["run"]], b["file"])]], 1, b["quote"], b["numbers"],
+                             *_how(b))
                 elif e["kind"] == "citation":
                     if seen.get(b["source"], {}).get("kind") not in ("source", "draft"):
                         raise Refusal(f"cites {b['source']}, which is not an earlier source or draft")
-                    qc.check(self.forms(b["source"]), b["page"], b["quote"], b["numbers"])
+                    qc.check(self.forms(b["source"]), b["page"], b["quote"], b["numbers"], *_how(b))
                     if b["source"] in fresh:
                         try:
-                            qc.check(fresh[b["source"]], b["page"], b["quote"], b["numbers"])
+                            qc.check(fresh[b["source"]], b["page"], b["quote"], b["numbers"], *_how(b))
                         except Refusal as r:
                             raise Refusal(f"in the document itself, {r.error}", r.meaning)
                 elif e["kind"] == "claim":
                     if any(seen.get(c, {}).get("kind") != "citation" for c in b["citations"]):
                         raise Refusal("rests on an id that is not an earlier citation")
-                    written = set().union(*(qc.numbers(seen[c]["body"]["quote"]) for c in b["citations"]))
-                    if qc.numbers(b["text"]) - written:
-                        raise Refusal("writes a number none of its quotes write")
+                    rules = b.get("rules", 1)
+                    told = qc.claim_numbers(b["text"]) if rules >= 2 else qc.numbers(b["text"])
+                    if told - claim_backing([seen[c] for c in b["citations"]], rules):
+                        raise Refusal("writes a number none of its citations back")
                     if b.get("supersedes") and seen.get(b["supersedes"], {}).get("kind") != "claim":
                         raise Refusal(f"supersedes {b['supersedes']}, which is not an earlier claim")
                     if b.get("trials", []) != pl.claim_trials(list(seen.values()), [seen[c] for c in b["citations"]]):

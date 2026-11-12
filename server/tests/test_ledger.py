@@ -39,12 +39,15 @@ def test_a_claim_needs_citations_and_every_number_it_writes_in_their_quotes(led,
     c = led.cite(src["id"], 2, "Site calibration 0.70")
     with pytest.raises(Refusal, match="at least one citation"):
         led.claim("Site calibration wins.", [])
-    with pytest.raises(Refusal, match="0.63 is not written in any quote"):
+    with pytest.raises(Refusal, match="0.63 is not a number any citation of the claim is cited for"):
         led.claim("The network reaches 0.63, ahead of site calibration at 0.70.", [c["id"]])
     with pytest.raises(Refusal, match="is not a citation"):
         led.claim("Site calibration wins.", [src["id"]])
     net = led.cite(src["id"], 2, "the network reaches a mean CRPS of 0.63", ["0.63"])
-    assert led.claim("The network reaches 0.63, ahead of site calibration at 0.7.", [c["id"], net["id"]])
+    with pytest.raises(Refusal, match="0.7 is not a number any citation"):  # in c's quote, but c is not cited for it
+        led.claim("The network reaches 0.63, ahead of site calibration at 0.7.", [c["id"], net["id"]])
+    site = led.cite(src["id"], 2, "Site calibration 0.70", ["0.70"])
+    assert led.claim("The network reaches 0.63, ahead of site calibration at 0.7.", [site["id"], net["id"]])
 
 
 def test_verify_finds_an_edited_entry_a_removed_one_and_a_changed_page(led, paper, tmp_path):

@@ -103,7 +103,7 @@ def test_a_claim_resting_on_a_refuted_citation_must_be_superseded(led, work):
     wrong = led.cite(log, 1, "blow-ups: 6 of 40 runs", ["6", "40"])
     old = led.claim("6 of 40 runs blew up.", [wrong["id"]])
     c = cq.critique(led, wrong["id"], [{"text": "those runs used other settings", "blocking": True}], "reviewer")
-    check = led.cite(log, 1, "solver iterations: 2 to 5\nCPU runs: 416")
+    check = led.cite(log, 1, "solver iterations: 2 to 5\nCPU runs: 416", ["416"])
     cq.answer(led, c["id"], "F1", "upheld", "the log mixes settings", [check["id"]])
     assert any(f"{old['id']} still rests on it" in p for p in led.verify()["problems"])
     led.claim("The CPU made 416 runs.", [check["id"]], supersedes=old["id"])

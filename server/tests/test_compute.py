@@ -74,7 +74,7 @@ def test_a_node_instrument_launches_and_its_run_is_recorded(led, tool):
     run = r["run"]["body"]
     assert r["status"] == "recorded" and run["exit"] == 0 and run["node"] == "local"
     assert run["outputs"]["result.txt"]["kept"] and run["outputs"]["result.txt"]["node_sha"]
-    c = led.cite_run(r["run"]["id"], "mean skill 0.71 at 12 stations", ["0.71"], file="result.txt")
+    c = led.cite_run(r["run"]["id"], "mean skill 0.71 at 12 stations", ["0.71", "12"], file="result.txt")
     led.claim("The instrument measures 0.71 at 12 stations.", [c["id"]])
     v = led.verify()
     assert v["ok"] and v["launch"] == 1 and v["open_launches"] == []
