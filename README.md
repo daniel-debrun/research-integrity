@@ -16,6 +16,12 @@ own evidence, and the session that owns the work checks and answers every findin
 revision can be recorded. When a critique changes the direction of a plan, a result or a draft, the ledger shows why,
 and shows that each point was checked rather than taken on the reviewer's word.
 
+Memory is checked too. A fact about the machine (a file's content, a config value, what a tag points to, a count a
+program printed) is recorded from a read-only probe the server runs itself, and probed again every time it is
+recalled, so a stale one comes back flagged instead of repeated. A decision is recorded on a subject and names the
+decision it replaces; the current ones are printed when a session starts. An agent's hand-back report can be
+checked reference by reference against the machine before anyone relies on it.
+
 Results are counted too. A plan is sealed before the runs it governs, every run is tagged with the hypothesis it
 tests, and a claim records how many trials stand behind it, so a best-of-forty can't pass as one experiment.
 
@@ -25,6 +31,9 @@ tests, and a claim records how many trials stand behind it, so a best-of-forty c
 |---|---|---|
 | `skills/citation-check/` | The method: read, quote verbatim, cite with numbers, claim on citations, verify. Ships `scripts/quotecheck.py`, the same check as the server, standard library only. | Any Agent Skills client: Claude Code, Claude Science, Cowork, Codex and others |
 | `server/` (`research-ledger`) | An MCP server (stdio) over the ledger: `add_source`, `read_page`, `cite`, `claim`, `verify`, `list_entries`, and for instruments `register_instrument`, `run_instrument`, `run_acting_instrument`, `reproduce_run`, `cite_run`. Every tool is annotated; only `run_acting_instrument` and `look_holdout` are destructive. | Any MCP client that runs a local command |
+| `server/` memory and search | `record_fact`, `recall`, `decide`, `list_subjects`, `list_decisions`, `write_digest`, `check_report`, `search_sources`, `annotate_source`, `anchor_ledger`. | Any MCP client that runs a local command |
+| `skills/memory/` | Facts probed on recall, decisions on subjects, hand-back reports checked, passages found to quote. | Any Agent Skills client |
+| `hooks/hooks.json` | At session start, prints current decisions, recent reversals and facts that no longer hold. | Claude Code |
 | `skills/plans/` | Decide before you look: seal the plan, tag every run, report the trial count, spend holdout looks deliberately. | Any Agent Skills client |
 | `skills/critique/` | How a review is recorded and answered, and how to report it: each finding with what you found when you checked. | Any Agent Skills client |
 | `agents/` | Five personas: `adversary` and `reviewer` (record critiques; can't edit, run shells or answer findings), `scout` (finds and cites sources), `replicator` (re-derives a number with its own code), `experimenter` (runs the planned measurements). | Claude Code |
@@ -161,6 +170,40 @@ Each entry records the rules it was checked under (`rules`), and `verify` rechec
 written by an older version stays valid. Rules 2 (v0.2.1) added the number-edge check on quotes, `casefold` on
 citations, and claims resting on their citations' cited numbers.
 
+## Memory
+
+A **fact** is a probe's result: `file` (exists, sha256, size), `text_in_file` (exact, at least 4 characters, never
+starting or ending inside a word or a number, `casefold` optional), `field` (a scalar at a dotted key of a JSON or
+TOML file; `plugins["name@market"].0.version` for keys with dots), `git_ref` (what a ref resolves to, and whether it
+is an ancestor of another) and `run` (a `cite_run` quote). The statement is written from the probe, so no other
+wording rides on it; a `note` is kept and marked unchecked. `recall` finds facts, decisions and claims by shared
+words (it finds and does not check) and re-probes each fact: `current`, `stale`, `unreachable` or `as_of`. `verify`
+lists stale facts under `stale_facts`; a stale fact is the world changing, so it does not make `ok` false.
+
+A **decision** is on a subject key. Subjects are a registry: a new one must be declared (`new_subject`), and the
+refusal lists the subjects that share a word with it, so `verification-firm.status` is not created silently beside
+`firm.status`. A decision on a subject that has one standing must `supersede` it. The session-start hook and
+`write_digest` print the current decisions, those superseded in the last two weeks and subjects created in that time.
+
+`check_report` extracts paths (existing or not), commits, branch and tag names, versions next to a declared name and
+test counts, and checks each. A version is compared with what is installed (`installed_plugins.json`, the records
+whose scope applies) when its sentence says installed, enabled or running, with the repository's manifests when it
+says declares, in the repo or bumped, and with both otherwise; two sources that disagree make it `ambiguous`.
+
+`search_sources` ranks passages of the recorded sources by BM25 over words. `annotate_source` gives a source a type
+(vendor and aggregator pages go stale after 90 days), a freshness window or a DOI, which is checked at Crossref for
+retraction and correction notices. `claim(subject=...)` keys a claim; standing claims on one subject with different
+numbers come back as `conflicts`. `record_draft` lists each line that writes a number no standing claim writes, the
+claims resting on stale, untyped or retracted sources, and the conflicts. When a recorded source's file changes,
+`verify` runs each of its citations against the new text and reports which quotes are on the same page, moved or gone.
+
+**Files that are never read.** Every file a tool reads, and every instrument snapshot, goes through a guard. It
+refuses, by the path as given and as resolved, credentials and keys (`.netrc`, `.pgpass`, `.ssh/`, `.aws/`, `.pypirc`,
+`.npmrc`, `.git-credentials`, `.credentials.json`, `.env`, `*.key`, `*.pem`, `id_*`, data files named for a token,
+secret or password, among others), other ledgers, and folders listed as licensed data in
+`~/.config/research-ledger/licensed_paths` (one per line, kept outside every project so it is never committed). While
+that list is empty, `verify` says so. A `field` key that names a secret is refused, so its value is never recorded.
+
 ## What the checks don't catch
 
 - **Page texts written by hand, for an `unread` source.** Without the document, `verify` can only check the folder
@@ -198,16 +241,28 @@ citations, and claims resting on their citations' cited numbers.
 - **Wording.** The list is two word families. "Significant" without a test and "outperforms" without a comparison are
   not flagged: the ledger has no entry kind for a test or a comparison to check them against.
 
+- **Memory searches by words.** `recall` and `search_sources` find candidates by shared words; a fact or passage
+  worded differently from the query is missed. They check nothing: the probes and `cite` do.
+- **A report's references the patterns miss.** `check_report` sees paths, hashes, refs, versions next to a declared
+  name and test counts. "All three need updating" names nothing and is `uncheckable`; a claim about behaviour ("the
+  tests cover X") is not checked at all.
+- **Hand-backs are checked when asked.** A `SubagentStop` hook sees the subagent's last message but cannot add to
+  the parent's context, so the check is a tool the parent calls (the memory skill says when).
+- **Decisions and documents.** A decision does not update the documents that describe the one it replaced.
+- **Other MCP clients.** The server is a standard stdio MCP server, but only Claude Code has been tested.
+
 ## Data and network use
 
-- **Reads**: the files you pass to `add_source` and `record_draft`, and the code folder you pass to
-  `register_instrument`.
-- **Writes**: only inside the ledger folder (`./.ledger`, or `$LEDGER_DIR`), and to the anchor file you name
-  for `anchor_ledger`.
+- **Reads**: the files you pass to `add_source`, `record_draft`, `record_fact` and `check_report` (and the paths a
+  checked report names, to see whether they exist), the code folder you pass to `register_instrument`, and
+  `~/.claude/plugins/installed_plugins.json` for version checks. Never the files the guard refuses (see Memory).
+- **Writes**: only inside the ledger folder (`./.ledger`, or `$LEDGER_DIR`), to the anchor file you name for
+  `anchor_ledger`, and to the marked block of the markdown file you name for `write_digest`.
 - **Runs**: the instruments you register, when a run tool is called. They do whatever their code does, including
   network access; the server adds none of its own.
 - **Network**: the server itself has one destination. `add_source` fetches a URL you give it, one GET to that URL
-  with the user agent `research-ledger/0.1`. Nothing else is sent anywhere: no telemetry, no analytics, no account.
+  with the user agent `research-ledger/0.1`; `annotate_source` with a `doi` sends that DOI to `api.crossref.org`.
+Nothing else is sent anywhere: no telemetry, no analytics, no account.
 - **Secrets**: an instrument's secrets are read by name from the server's environment and passed to its runs only.
   Their values are never recorded and are masked in stored output. Set them where the server starts, such as the
   `env` of its entry in `.mcp.json`.
@@ -216,7 +271,7 @@ citations, and claims resting on their citations' cited numbers.
 ## Privacy
 
 The plugin collects nothing. Documents, instruments, runs, quotes and claims stay in the ledger folder on your
-machine. The server's only outbound request is a URL fetch you ask for.
+machine. The server's only outbound requests are a URL fetch and a DOI lookup you ask for.
 
 ## Develop
 

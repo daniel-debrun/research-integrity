@@ -16,14 +16,16 @@ neighbouring row is refused.
 
 When the `research-ledger` tools are available, every check is recorded in the project's `.ledger/`.
 
-1. **Record the document once** with `add_source`, and use the returned `source` id from then on.
+1. **Record the document once** with `add_source` (with its `source_type`, and its `doi` for a paper), and use the
+   returned `source` id from then on. To find the passage that answers a question, `search_sources` first.
 2. **Read before quoting** with `read_page`, and quote from that text, which is exactly what the check reads. For a
    table row, read the page with `layout: true` and quote the row as it appears there.
 3. **Cite** with the source, the page, the quote copied verbatim, and `numbers`: every number the statement will
    take from this quote, written as the quote writes it. If you're unsure of the page, cite your best guess; a
    refusal names the page the quote is on.
-4. **Claim** with the statement and the citation ids it rests on. Every number the statement writes must be written
-   in one of those quotes. A number you computed (a difference, a ratio) is not quoted: compute it with an
+4. **Claim** with the statement and the citation ids it rests on. Every number the statement writes must be one a
+   citation was cited for (a label's number, such as Table 4, aside; a year counts). A quote that stops inside a
+   longer number ("0.6" of "0.61") is refused. A number you computed (a difference, a ratio) is not quoted: compute it with an
    instrument (below) and cite its output, say it in words, or leave it out of the claim.
 5. **Verify** before you report, and report its result. If it lists problems, fix them with new citations or say
    plainly that they remain.
