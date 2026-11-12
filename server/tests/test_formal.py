@@ -42,6 +42,8 @@ def led(tmp_path):
 def model(tmp_path):
     folder = tmp_path / "model"
     shutil.copytree(EXAMPLE, folder)
+    for f in [folder, *folder.rglob("*")]:  # writable even when copied from a read-only snapshot
+        f.chmod(f.stat().st_mode | 0o200)
     return folder
 
 
