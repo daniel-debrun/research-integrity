@@ -27,9 +27,10 @@ from pathlib import Path
 from . import guard
 from .quotecheck import Refusal
 
-_PATH = re.compile(r"(?<![\w:/.])((?:~|\.{1,2})?/[\w.@+~-][\w.@+~/-]*|[\w.@+-]+(?:/[\w.@+-]+)+\.[A-Za-z0-9]{1,8}"
-                   r"|[\w@+-][\w.@+-]*\.(?:py|md|json|toml|ya?ml|txt|sh|ts|tsx|js|rs|go|c|h|cpp|hpp|tex|csv|ipynb|lean|"
-                   r"cfg|ini|lock|pdf))(?::(\d+))?(?![\w/])")
+EXT = (r"(?:py|md|json|jsonl|toml|ya?ml|txt|sh|ts|tsx|js|rs|go|c|h|cpp|hpp|tex|csv|gz|parquet|ipynb|lean|cfg|ini|"
+       r"lock|pdf|html|sql|r|rmd)")
+_PATH = re.compile(r"(?<![\w:/.])((?:~|\.{1,2})?/[\w.@+~-][\w.@+~/-]*|[\w.@+-]+(?:/[\w.@+-]+)+\." + EXT +
+                   r"|[\w@+-][\w.@+-]*\." + EXT + r")(?::(\d+))?(?![\w/])", re.I)
 _HEX = re.compile(r"(?<![\w:/.-])([0-9a-f]{7,40})(?![\w-])")
 _REF = re.compile(r"\b(branch|tag)\s+[`'\"]?([\w][\w./-]*[\w])[`'\"]?", re.I)
 _BARE = re.compile(r"(?<![\w.])v?(\d+\.\d+\.\d+(?:[-+][\w.]+)?)(?![\w.]*\d)")
@@ -94,9 +95,53 @@ def repo_versions(root: Path | None) -> dict:
     return out
 
 
+SKIP_WALK = {".git", "node_modules", "venv", "__pycache__", ".ledger", ".cache", ".lake", "site-packages", "build",
+             "dist", "snapshots"}
+NEGATED = re.compile(r"\b(missing|absent|does not exist|doesn't exist|no such|not found|nonexistent|deleted|removed)\b",
+                     re.I)
+
+
+class Exhausted(Exception):
+    """The search below the working folder hit its budget before it was done."""
+
+
+def _find_below(token: str, bases: list, budget: int = 20000) -> list:
+    """Files under `bases` whose path ends with `token` (a relative path written without its folder)."""
+    want = Path(token).parts
+    out, seen = [], 0
+    for base in bases:
+        for d, dirs, files in os.walk(base):
+            dirs[:] = [x for x in dirs if x not in SKIP_WALK and not x.startswith(".venv")
+                       and not guard.why(Path(d) / x)]
+            seen += len(files)
+            if want[-1] in files:
+                cand = Path(d) / want[-1]
+                if cand.parts[-len(want):] == want and cand not in out:
+                    out.append(cand)
+            if len(out) > 5:
+                return out
+            if seen > budget:
+                raise Exhausted
+    return out
+
+
 def _path_state(token: str, line: str | None, cwd: Path, root: Path | None) -> dict:
     p = Path(token).expanduser()
     tries = [p] if p.is_absolute() else [cwd / p] + ([root / p] if root else [])
+    if not p.is_absolute() and not token.startswith(("./", "../", "~")) and not any(t.exists() for t in tries):
+        try:
+            found = [f for f in _find_below(token, [b for b in {cwd, root} if b]) if not guard.why(f)]
+        except Exhausted:
+            return {"state": "uncheckable", "why": "written without its folder, and too many files to search"}
+        if len(found) == 1:
+            tries = found
+        elif found:
+            return {"state": "uncheckable", "why": "written without its folder; several files match",
+                    "seen": [str(f) for f in found[:5]]}
+        elif "/" not in token:
+            return {"state": "uncheckable", "why": "a bare file name not found under the working folder"}
+        else:
+            return {"state": "missing"}
     for t in tries:
         r = guard.why(t)
         if r:
@@ -143,13 +188,19 @@ def extract_and_check(text: str, cwd=None, entries=(), installed_path: Path = IN
         out.append({"kind": kind, "ref": ref, "line": text.count("\n", 0, i) + 1, **state})
 
     for m in _PATH.finditer(text):
-        tok = m.group(1)
-        if text[max(0, m.start() - 3):m.start()].endswith("://") or tok.count(".") == len(tok):
+        tok = m.group(1).rstrip(".,;:")
+        if text[max(0, m.start() - 3):m.start()].endswith("://") or not tok.strip("."):
             continue
+        if "..." in tok or "<" in tok or "*" in tok:  # a placeholder or a pattern, not a path
+            continue
+        if tok.startswith("/") and tok.count("/") == 1 and "." not in tok and not Path(tok).exists():
+            continue  # a slash command or a fragment ("/btw"), not a path
         if _HEX.fullmatch(tok):
             continue
-        add("path", tok + (f":{m.group(2)}" if m.group(2) else ""), m.start(),
-            **_path_state(tok, m.group(2), cwd, root))
+        st = _path_state(tok, m.group(2), cwd, root)
+        if st["state"] == "missing" and NEGATED.search(_sentence(text, m.start()).replace(m.group(0), " ")):
+            st = {"state": "confirmed", "why": "the report says it is missing, and it is"}
+        add("path", tok + (f":{m.group(2)}" if m.group(2) else ""), m.start(), **st)
     for m in _HEX.finditer(text):
         h = m.group(1)
         if not (re.search(r"[a-f]", h) and re.search(r"\d", h)):
@@ -173,14 +224,18 @@ def extract_and_check(text: str, cwd=None, entries=(), installed_path: Path = IN
             continue
         sent = _sentence(text, m.start())
         for name in sorted(names):
-            if INSTALLED_WORDS.search(sent):
+            said_installed, said_repo = INSTALLED_WORDS.search(sent), REPO_WORDS.search(sent)
+            if said_installed and not said_repo:
                 sources = {"installed": inst.get(name)}
-            elif REPO_WORDS.search(sent):
+            elif said_repo and not said_installed:
                 sources = {"repo": repo.get(name)}
             else:
                 sources = {"installed": inst.get(name), "repo": repo.get(name)}
             answers = {k: sorted(v) for k, v in sources.items() if v}
             ref = f"{name} {ver}"
+            if said_installed and said_repo and any(ver in v for v in answers.values()):
+                add("version", ref, m.start(), state="confirmed", seen=answers, why="the sentence compares the two")
+                continue
             if not answers:
                 add("version", ref, m.start(), state="uncheckable")
                 continue

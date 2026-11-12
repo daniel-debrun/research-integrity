@@ -66,6 +66,8 @@ def test_paths_commits_and_tags(world):
     assert out[world["sha"][:7]]["state"] == "confirmed"
     assert out["v0.2.0"]["state"] == "confirmed" and out["feature-x"]["state"] == "missing"
     assert "1a2b3c4d5e6f" not in out and "1234567" not in out
+    said = check(world, "The changelog points to server/gone.py, which is missing.")
+    assert said["server/gone.py"]["state"] == "confirmed"
     assert not any("example.com" in k for k in out)
 
 

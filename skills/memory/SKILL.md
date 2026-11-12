@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Remember facts about the machine and decisions about the work so that a later session, or another agent, can rely on them without being told again, and check an agent's hand-back before relying on it. Use when you learn something that will matter later (a version, a commit, a path, a measured count), when a decision is made or reversed, at the start of work that depends on earlier decisions, and on every subagent report that names files, commits, versions or test counts.
+description: Remember facts about the machine and decisions about the work so that a later session, or another agent, can rely on them without being told again, and check a hand-back's file and version claims when they matter. Use when you learn something that will matter later (a version, a commit, a path, a measured count), when a decision is made or reversed, at the start of work that depends on earlier decisions.
 license: Apache-2.0
 compatibility: Needs the research-ledger MCP server (research-integrity 0.3 or later).
 ---
@@ -43,14 +43,15 @@ instead (Codex, Gemini CLI), `write_digest("AGENTS.md")` writes them into a mark
 A decision does not update documents that describe the old one. When you supersede a decision, find those documents
 and fix them, or say which still need it.
 
-## Hand-back reports: check before relying
+## Hand-back reports: an experimental check
 
-Run `check_report` on every subagent report that names files, commits, branches, tags, versions or test counts,
-before you repeat any of it. Each reference comes back `confirmed`, `contradicted` (with what is there), `missing`,
-`refused`, `ambiguous` or `uncheckable`. Treat contradicted and missing items as the subagent's errors: check them
-yourself and correct them in what you report. Say "installed", "in the repo" and the like when you report versions:
-the checker uses those words to pick what to compare against, and a version with no name next to it can't be
-checked.
+`check_report` checks the paths, commits, branches, tags, versions and test counts a report states, each coming back
+`confirmed`, `contradicted` (with what is there), `missing`, `refused`, `ambiguous` or `uncheckable`. It is
+experimental: on 20 real subagent reports it found no wrong reference and raised 2 false alarms, so run it when a
+report's file, commit or version claims matter to what you do next, not on every report. Check a `contradicted` or
+`missing` item yourself before calling it the subagent's error. Say "installed" or "in the repo" when you report a
+version: the checker uses those words to pick what to compare against, and a version with no name next to it can't
+be checked.
 
 ## Finding passages
 

@@ -246,6 +246,9 @@ that list is empty, `verify` says so. A `field` key that names a secret is refus
 - **A report's references the patterns miss.** `check_report` sees paths, hashes, refs, versions next to a declared
   name and test counts. "All three need updating" names nothing and is `uncheckable`; a claim about behaviour ("the
   tests cover X") is not checked at all.
+- **The report checker is experimental.** On the last 20 real subagent reports on this machine it found no wrong
+  reference and raised 2 false alarms (a hypothetical path, and a sentence comparing two versions); 10 more could not
+  be judged because the worktrees they named were gone. Its pre-set bar for a hook was 3 real catches.
 - **Hand-backs are checked when asked.** A `SubagentStop` hook sees the subagent's last message but cannot add to
   the parent's context, so the check is a tool the parent calls (the memory skill says when).
 - **Decisions and documents.** A decision does not update the documents that describe the one it replaced.
