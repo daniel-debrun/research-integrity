@@ -14,6 +14,7 @@ from mcp.types import ToolAnnotations
 
 from . import critique as cq
 from . import instruments as ins
+from . import memory as mem
 from . import plans as pl
 from .ledger import Ledger
 from .quotecheck import Refusal
@@ -232,6 +233,48 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
     def list_findings(target: str = "", open_only: bool = False) -> dict:
         """Critiques' findings with their status (open, upheld, dismissed): on one target, or all."""
         return _safe(lambda: {"ok": True, "findings": cq.listing(ledger, target, open_only)})
+
+    @server.tool(annotations=appends("Record a fact"))
+    def record_fact(probe: str, target: str, expect: str | None = None, note: str = "", text: str = "",
+                    key: str = "", ref: str = "", ancestor_of: str = "", casefold: bool = False) -> dict:
+        """Record a fact about the machine that the server checks itself, and checks again whenever it is recalled.
+        `probe` is one of: file (target: a path; records sha256 and size), text_in_file (target, `text`: exact, at
+        least 4 characters, never cut inside a word or number), field (target: a JSON or TOML file, `key`: dotted,
+        such as project.version; keys naming secrets are refused), git_ref (target: a repository, `ref`, optional
+        `ancestor_of`), run (target: a cite_run citation id). `expect` refuses the fact if the probe sees otherwise.
+        The fact's statement is written from what the probe saw; `note` is kept, marked unchecked."""
+        return _safe(lambda: _entry(mem.record_fact(ledger, probe, target, expect, note, text, key, ref, ancestor_of,
+                                                    casefold)))
+
+    @server.tool(annotations=reads("Recall"))
+    def recall(query: str, kinds: list[str] | None = None, rerun: bool = False) -> dict:
+        """Find facts, decisions and claims by the words they share with `query`, newest and closest first. Each
+        fact is probed again: current, stale (with what the probe sees now), unreachable, or as_of for a run fact
+        (pass `rerun` to run its instrument again, which records a run). Superseded decisions and claims are left
+        out. The search only finds; the probes check."""
+        return _safe(lambda: {"ok": True, **mem.recall(ledger, query, tuple(kinds or ("fact", "decision", "claim")),
+                                                      rerun)})
+
+    @server.tool(annotations=appends("Record a decision"))
+    def decide(subject: str, question: str, choice: str, reason: str, evidence: list[str] | None = None,
+               supersedes: str = "", new_subject: bool = False) -> dict:
+        """Record a decision on a subject key (such as firm.status or release.split): the question, the choice, why,
+        and the entries it rests on. Refused on a subject the ledger does not have unless `new_subject` (the refusal
+        lists subjects that look like it: use one if it fits), and refused on a subject with a standing decision
+        unless `supersedes` names it. Current decisions are printed at each session's start."""
+        return _safe(lambda: _entry(mem.decide(ledger, subject, question, choice, reason, evidence or [], supersedes,
+                                               new_subject)))
+
+    @server.tool(annotations=reads("List subjects"))
+    def list_subjects() -> dict:
+        """Every subject key in the ledger (decisions, plans, claims), with where it was first used."""
+        return _safe(lambda: {"ok": True, "subjects": list(mem.subjects(ledger.entries()).values())})
+
+    @server.tool(annotations=reads("List decisions"))
+    def list_decisions(current_only: bool = True, days: int = 14) -> dict:
+        """The decision standing on each subject, and those superseded in the last `days`, each with its
+        replacement."""
+        return _safe(lambda: {"ok": True, **mem.list_decisions(ledger.entries(), current_only, days)})
 
     @server.tool(annotations=reads("Verify the ledger"))
     def verify(anchor: str = "") -> dict:

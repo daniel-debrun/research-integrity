@@ -19,6 +19,9 @@ Kinds:
 - plan, look: what a study tests, sealed before the runs it governs, and one look at its holdout (see plans.py). A
   run or launch tagged to a plan's hypothesis is one of its trials; a claim resting on one records the count.
 - model, verdict: a hypothesis's machine-checked formal model, and its computed verdict (research-formal).
+- fact, decision: a probe's result about the machine, re-probed on recall, and a decision on a subject that names
+  what it replaces (see memory.py). A stale fact is listed by `verify`, not a problem: the world changed, not the
+  ledger.
 
 `work/` (snapshot copies and run folders) and `.lock` are not part of the record; the ledger's .gitignore says so.
 """
@@ -36,6 +39,7 @@ from . import critique as cq
 from . import formal as fm
 from . import guard
 from . import instruments as ins
+from . import memory as mem
 from . import plans as pl
 from . import quotecheck as qc
 from .quotecheck import Refusal
@@ -307,6 +311,8 @@ class Ledger:
                     pl.verify_entry(self, e, seen)
                 elif e["kind"] in ("model", "verdict"):
                     fm.verify_entry(self, e, seen)
+                elif e["kind"] in ("fact", "decision"):
+                    mem.verify_entry(self, e, seen)
                 elif e["kind"] in ("draft", "critique", "answer"):
                     cq.verify_entry(self, e, seen)
                 elif e["kind"] == "citation" and "run" in b:
@@ -340,7 +346,7 @@ class Ledger:
                 problems.append(f"{where}: a blob it needs is missing")
             seen[e["id"]] = e
         kinds = ("source", "instrument", "run", "reproduction", "citation", "claim", "draft", "critique", "answer",
-                 "node", "launch", "plan", "look", "model", "verdict")
+                 "node", "launch", "plan", "look", "model", "verdict", "fact", "decision")
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]
@@ -351,7 +357,8 @@ class Ledger:
         reps = [v for v in seen.values() if v["kind"] == "reproduction"]
         warn = guard.licensed_status()
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
-                "problems": problems, **({"warnings": [warn]} if warn else {}), "unread": unread, "open_findings": review["open_findings"],
+                "problems": problems, **({"warnings": [warn]} if warn else {}),
+                "stale_facts": mem.stale_facts(self, list(seen.values())), "unread": unread, "open_findings": review["open_findings"],
                 "reproductions": {"reproduced": sum(r["body"]["verdict"] == "reproduced" for r in reps),
                                   "differs": [r["id"] for r in reps if r["body"]["verdict"] == "differs"]},
                 "open_launches": open_launches, "personas": review["personas"],
