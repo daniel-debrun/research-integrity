@@ -221,6 +221,41 @@ class Ledger:
         words = cq.wording(text)
         return {**e, "wording": words} if words else e
 
+    def anchor(self, path: str) -> dict:
+        """Write the chain's head (its length and last hash) to a file outside the ledger, one line per anchor.
+        A copy kept elsewhere (a commit, a message, a timestamping service) lets `verify` show an entry removed from
+        the end or a chain rewritten whole, which the chain alone cannot."""
+        out = Path(path).expanduser().resolve()
+        if out == self.root.resolve() or self.root.resolve() in out.parents:
+            raise Refusal("an anchor is written outside the ledger", "inside it, whoever rewrites the chain rewrites "
+                          "the anchor too", "give a path outside the ledger folder")
+        entries = self.entries()
+        if not entries:
+            raise Refusal("the ledger is empty", "there is no head to anchor")
+        row = {"seq": entries[-1]["seq"], "hash": entries[-1]["hash"],
+               "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ledger": str(self.root)}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, sort_keys=True) + "\n")
+        return {"ok": True, "path": str(out), **row}
+
+    def check_anchor(self, path: str) -> list:
+        """Problems between the chain and the anchors in `path`."""
+        p = Path(path).expanduser()
+        if not p.is_file():
+            raise Refusal(f"no anchor file at {path}", "anchor writes one", "give the anchor file's path")
+        entries, problems = self.entries(), []
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            a = json.loads(line)
+            if a["seq"] >= len(entries):
+                problems.append(f"anchor {n}: the chain has {len(entries)} entries, but entry {a['seq']} was "
+                                "anchored (entries removed from the end)")
+            elif entries[a["seq"]]["hash"] != a["hash"]:
+                problems.append(f"anchor {n}: entry {a['seq']} is not the one anchored (the chain was rewritten)")
+        return problems
+
     # --- checking -------------------------------------------------------------------------------------------------
     def document(self, origin: str) -> bytes | None:
         """A source's bytes read again from the file it was recorded from (a relative path from the working
@@ -233,7 +268,7 @@ class Ledger:
                 return p.read_bytes()
         return None
 
-    def verify(self) -> dict:
+    def verify(self, anchor: str = "") -> dict:
         """Walk the chain: each hash recomputed, each link to an earlier entry, each blob intact, each citation's
         check run again on the stored pages, each claim's numbers in its quotes. A source whose file is still there
         is read again: its bytes must hash as recorded, and each citation's check runs on its pages read afresh, so
@@ -307,6 +342,8 @@ class Ledger:
         counts = {k: sum(1 for v in seen.values() if v["kind"] == k) for k in kinds}
         review = cq.summary(list(seen.values()))
         problems += review["problems"]
+        if anchor:
+            problems += self.check_anchor(anchor)
         ran = {v["body"].get("launch") for v in seen.values() if v["kind"] == "run"}
         open_launches = [v["id"] for v in seen.values() if v["kind"] == "launch" and v["id"] not in ran]
         reps = [v for v in seen.values() if v["kind"] == "reproduction"]

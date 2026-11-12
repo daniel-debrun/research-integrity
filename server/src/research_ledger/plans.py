@@ -24,11 +24,31 @@ where they were counted; the declaration is the author's word, recorded so the c
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from .quotecheck import Refusal
 
 TAGS = ("plan", "hypothesis", "look")
+#: a subject key, such as `loss.ablation` or `firm.status`: lowercase letters, digits, dots and hyphens
+SUBJECT = re.compile(r"[a-z0-9][a-z0-9.-]{0,79}")
+
+
+def subject_key(subject: str) -> str:
+    s = subject.strip()
+    if s and not SUBJECT.fullmatch(s):
+        raise Refusal(f"`{subject}` is not a subject key", "lowercase letters, digits, dots and hyphens, such as "
+                      "loss.ablation", "write it as a key")
+    return s
+
+
+def _same_subject(entries, subject: str, name: str):
+    """The latest version of another plan sealed on this subject, if any."""
+    if not subject:
+        return None
+    names = {e["body"]["name"] for e in entries if e["kind"] == "plan" and e["body"]["name"] != name
+             and e["body"].get("subject") == subject}
+    return next((current(entries, n) for n in sorted(names)), None)
 
 
 def _sha_file(path: Path) -> str:
@@ -126,10 +146,12 @@ def _holdout(paths) -> list:
     return out
 
 
-def seal(led, name: str, question: str, hypotheses: list, holdout=(), continues: str = "", prior_trials=None) -> dict:
+def seal(led, name: str, question: str, hypotheses: list, holdout=(), continues: str = "", prior_trials=None,
+         subject: str = "") -> dict:
     """Record a plan before the runs it governs. `continues` names an earlier plan whose question this one takes up:
     a hypothesis keeping one of its ids inherits that id's trials. `prior_trials` declares trials counted in another
-    ledger."""
+    ledger. `subject` keys the question (`loss.ablation`), so a reworded question on the same subject is caught too."""
+    subject = subject_key(subject)
     if not name.strip() or not question.strip():
         raise Refusal("a plan needs a name and a question")
     entries = led.entries()
@@ -142,7 +164,7 @@ def seal(led, name: str, question: str, hypotheses: list, holdout=(), continues:
         if current(entries, prev["body"]["name"])["id"] != prev["id"]:
             raise Refusal(f"{continues} was replaced by an amendment", "a plan continues the latest version",
                           f"continue {current(entries, prev['body']['name'])['id']}")
-    same = _same_question(entries, question, name)
+    same = _same_question(entries, question, name) or _same_subject(entries, subject, name)
     if same and not prev:
         raise Refusal(f"a plan asking this question is already sealed as {same['body']['name']} ({same['id']})",
                       "a trial count belongs to the question; a new name would start it at zero",
@@ -152,7 +174,7 @@ def seal(led, name: str, question: str, hypotheses: list, holdout=(), continues:
     return led._append("plan", {"name": name, "question": question.strip(), "hypotheses": hyps,
                                 "holdout": _holdout(holdout), "version": 1, "supersedes": "", "reason": "",
                                 "because": [], "continues": prev["id"] if prev else "",
-                                "prior_trials": _prior(prior_trials, hyps)})
+                                "prior_trials": _prior(prior_trials, hyps), **({"subject": subject} if subject else {})})
 
 
 def amend(led, name: str, reason: str, question: str = "", hypotheses=None, holdout=None, because=()) -> dict:
@@ -173,7 +195,8 @@ def amend(led, name: str, reason: str, question: str = "", hypotheses=None, hold
             "hypotheses": _hypotheses(hypotheses, b["hypotheses"]) if hypotheses is not None else b["hypotheses"],
             "holdout": _holdout(holdout) if holdout is not None else b["holdout"], "version": b["version"] + 1,
             "supersedes": old["id"], "reason": reason.strip(), "because": list(because or []),
-            "continues": b.get("continues", ""), "prior_trials": b.get("prior_trials", {})}
+            "continues": b.get("continues", ""), "prior_trials": b.get("prior_trials", {}),
+            **({"subject": b["subject"]} if b.get("subject") else {})}
     if {k: body[k] for k in ("question", "hypotheses", "holdout")} == {k: b[k] for k in ("question", "hypotheses",
                                                                                          "holdout")}:
         raise Refusal("the amendment changes nothing", "an amendment changes the question, a hypothesis or the holdout")
@@ -318,9 +341,12 @@ def status(entries, name: str) -> dict:
     hyps = [{"id": h["id"], "statement": h["statement"], **counts(entries, name, h["id"]), **formal(h["id"])}
             for h in p["body"]["hypotheses"]]
     tagged = [e for e in entries if e["kind"] == "run" and e["body"].get("plan") in ids]
-    used = {e["body"]["instrument"] for e in tagged}
+    # by instrument name, so a version registered again after a tweak is still the same instrument's runs
+    names = {e["id"]: e["body"]["name"] for e in entries if e["kind"] == "instrument"}
+    used = {names.get(e["body"]["instrument"], e["body"]["instrument"]) for e in tagged}
     untagged = [e["id"] for e in entries if e["kind"] == "run" and e["seq"] > first and not e["body"].get("plan")
-                and not e["body"].get("reproduces") and e["body"]["instrument"] in used]
+                and not e["body"].get("reproduces")
+                and names.get(e["body"]["instrument"], e["body"]["instrument"]) in used]
     looks = [{"look": e["id"], "reason": e["body"]["reason"],
               "used_by": next((r["id"] for r in entries if r["kind"] in ("run", "launch")
                                and r["body"].get("look") == e["id"]), None)}
@@ -378,7 +404,8 @@ def verify_entry(led, e: dict, seen: dict) -> None:
             cont = b.get("continues", "")
             if cont and seen.get(cont, {}).get("kind") != "plan":
                 raise Refusal(f"continues {cont}, which is not an earlier plan")
-            same = _same_question(earlier, b["question"], b["name"])
+            same = _same_question(earlier, b["question"], b["name"]) or \
+                _same_subject(earlier, b.get("subject", ""), b["name"])
             if same and not cont:
                 raise Refusal(f"seals the question of {same['body']['name']} again under a new name")
             prior = b.get("prior_trials", {})

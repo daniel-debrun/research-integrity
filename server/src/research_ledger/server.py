@@ -46,7 +46,7 @@ def _entry(e: dict) -> dict:
 
 def build(root: str | os.PathLike | None = None) -> MCPServer:
     ledger = Ledger(root or os.environ.get("LEDGER_DIR") or Path.cwd() / ".ledger")
-    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.2.0")
+    server = MCPServer("research-ledger", instructions=INSTRUCTIONS, version="0.2.1")
 
     def reads(title):
         return ToolAnnotations(title=title, read_only_hint=True)
@@ -74,12 +74,14 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         return _safe(go)
 
     @server.tool(annotations=appends("Cite a passage"))
-    def cite(source: str, page: int, quote: str, numbers: list[str | float] | None = None) -> dict:
+    def cite(source: str, page: int, quote: str, numbers: list[str | float] | None = None,
+             casefold: bool = False) -> dict:
         """Record a verbatim quote from one page of a source, or from a draft (page 1), with every number it is
         cited for. Refused unless the
         quote is on that page (a refusal names the page it is on) and writes each number (0.50 matches 0.5, 1,234
-        matches 1234). Never paraphrase or join passages from different places."""
-        return _safe(lambda: _entry(ledger.cite(source, page, quote, numbers or [])))
+        matches 1234). A quote that starts or ends inside a longer number is refused. `casefold` matches letters
+        regardless of case. Never paraphrase or join passages from different places."""
+        return _safe(lambda: _entry(ledger.cite(source, page, quote, numbers or [], casefold)))
 
     @server.tool(annotations=appends("Register an instrument", idempotent_hint=True))
     def register_instrument(name: str, command: str, source: str = "", secrets: list[str] | None = None,
@@ -149,7 +151,7 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
 
     @server.tool(annotations=appends("Seal a plan"))
     def seal_plan(name: str, question: str, hypotheses: list[dict], holdout: list[str] | None = None,
-                  continues: str = "", prior_trials: dict | None = None) -> dict:
+                  continues: str = "", prior_trials: dict | None = None, subject: str = "") -> dict:
         """Record what a study will test before the runs it governs: the question, and hypotheses, each
         {"statement": what it claims, "metric": what is measured, "success": what counts as a result, "comparison":
         against what (optional)}, numbered H1, H2, ... `holdout` lists files the work must not look at until a
@@ -157,9 +159,10 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         to the question: sealing a question an earlier plan asks is refused unless `continues` names that plan (its
         id), and then a hypothesis given one of its ids ("id": "H1") inherits that id's trials. In a fresh ledger,
         `prior_trials` declares the trials counted elsewhere: {"from": that ledger's head hash, URL or path, "H1":
-        12, ...}; it is your word, recorded as such."""
+        12, ...}; it is your word, recorded as such. `subject` keys the question (`loss.ablation`): another plan on the
+        same subject is refused like the same question, however it is worded."""
         return _safe(lambda: _entry(pl.seal(ledger, name, question, hypotheses, holdout or [], continues,
-                                            prior_trials)))
+                                            prior_trials, subject)))
 
     @server.tool(annotations=appends("Amend a plan"))
     def amend_plan(name: str, reason: str, question: str = "", hypotheses: list[dict] | None = None,
@@ -186,15 +189,16 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         return _safe(lambda: _entry(pl.look(ledger, plan, reason)))
 
     @server.tool(annotations=appends("Cite a run's output"))
-    def cite_run(run: str, quote: str, numbers: list[str | float] | None = None, file: str = "stdout") -> dict:
+    def cite_run(run: str, quote: str, numbers: list[str | float] | None = None, file: str = "stdout",
+                 casefold: bool = False) -> dict:
         """Record a verbatim quote from a run's output (`file`: stdout, stderr or one of its text outputs), with
         every number it is cited for. Refused unless the quote is there and writes each number."""
-        return _safe(lambda: _entry(ledger.cite_run(run, quote, numbers or [], file)))
+        return _safe(lambda: _entry(ledger.cite_run(run, quote, numbers or [], file, casefold)))
 
     @server.tool(annotations=appends("Make a claim"))
     def claim(text: str, citations: list[str], supersedes: str = "") -> dict:
         """Record a statement resting on citations (their ids from cite or cite_run). Refused unless every number
-        the statement writes is written in a quote it cites. `supersedes` replaces an earlier claim; refused while a
+        the statement writes is one its citations were cited for (a label's number, such as Table 4, aside). `supersedes` replaces an earlier claim; refused while a
         blocking finding on it is unanswered. Answers with `wording` when the statement uses a word it should not
         ("proves", "novel"); the claim is recorded all the same."""
         return _safe(lambda: _entry(ledger.claim(text, citations, supersedes)))
@@ -230,13 +234,21 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
         return _safe(lambda: {"ok": True, "findings": cq.listing(ledger, target, open_only)})
 
     @server.tool(annotations=reads("Verify the ledger"))
-    def verify() -> dict:
+    def verify(anchor: str = "") -> dict:
         """Recheck the whole ledger: every hash and link in the chain, every stored page, every citation's quote on
         its page, every claim's numbers in its quotes. Sources whose files are still there are read again and each
         citation rechecked against the document itself; `unread` lists those that could not be (URLs, moved files).
         Instruments' code and runs' stored outputs are checked against their hashes, and each reproduction's
-        comparison is recomputed from them; nothing is run again here (reproduce_run does that)."""
-        return _safe(ledger.verify)
+        comparison is recomputed from them; nothing is run again here (reproduce_run does that). `anchor` names a file
+        written by anchor_ledger: an entry removed from the end, or a chain rewritten, shows up against it."""
+        return _safe(lambda: ledger.verify(anchor))
+
+    @server.tool(annotations=appends("Anchor the ledger"))
+    def anchor_ledger(path: str) -> dict:
+        """Append the chain's head (its length and last hash) to a file outside the ledger. Keep that file where
+        the ledger's writer cannot quietly change it (commit it elsewhere, send it, timestamp it); verify with
+        `anchor` then shows entries removed from the end or a rewritten chain."""
+        return _safe(lambda: ledger.anchor(path))
 
     @server.tool(annotations=reads("List the ledger"))
     def list_entries(kind: str = "") -> dict:

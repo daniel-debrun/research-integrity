@@ -115,7 +115,7 @@ def record_draft(led, path: str, supersedes: str = "") -> dict:
     drafts = {e["id"] for e in entries if e["kind"] == "draft"}
     quoted = set().union(*(qc.numbers(e["body"]["quote"]) for e in entries
                            if e["kind"] == "citation" and e["body"].get("source") not in drafts))
-    untraced = sorted(qc.numbers(text) - quoted)
+    untraced = sorted(qc.claim_numbers(text) - quoted)
     if known and (not supersedes or known["body"]["supersedes"] == supersedes):
         return {**known, "already": True, "untraced_numbers": [str(n) for n in untraced], "wording": wording(text)}
     old = None

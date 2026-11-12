@@ -77,3 +77,45 @@ def test_rules_1_entries_are_rechecked_as_recorded(led, paper):
         out.append(e)
     led.chain.write_text("".join(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n" for e in out))
     assert led.verify()["ok"], led.verify()["problems"]
+
+
+def test_a_reworded_question_on_the_same_subject_is_refused(led):
+    from research_ledger import plans as pl
+    h = [{"statement": "the new loss helps", "metric": "dev accuracy", "success": "+1 point"}]
+    pl.seal(led, "loss-a", "Does the new loss beat the baseline?", h, subject="loss.ablation")
+    with pytest.raises(Refusal, match="already sealed as loss-a"):
+        pl.seal(led, "loss-b", "Is the baseline beaten by the new loss?", h, subject="loss.ablation")
+    with pytest.raises(Refusal, match="not a subject key"):
+        pl.seal(led, "loss-c", "Another question", h, subject="Loss Ablation")
+    assert led.verify()["ok"]
+
+
+def test_an_instrument_registered_again_keeps_its_untagged_runs_listed(led, tmp_path):
+    import sys
+    from research_ledger import instruments as ins
+    from research_ledger import plans as pl
+    src = tmp_path / "tool"
+    src.mkdir()
+    (src / "score.py").write_text("print('accuracy 0.5')\n")
+    ins.register(led, "score", f"{sys.executable} score.py", str(src))
+    h = [{"statement": "it scores", "metric": "accuracy", "success": "above 0.4"}]
+    pl.seal(led, "s", "Does it score?", h)
+    ins.run(led, "score", tags=pl.tag(led, "s", "H1"))
+    (src / "score.py").write_text("print('accuracy 0.9')\n")  # tweaked, registered again: a new version
+    v2 = ins.register(led, "score", f"{sys.executable} score.py", str(src))["body"]["version"]
+    r = ins.run(led, f"score@{v2}")
+    assert r["id"] in pl.status(led.entries(), "s")["untagged_runs"]
+
+
+def test_an_anchor_shows_a_removed_last_entry_and_a_rewritten_chain(led, paper, tmp_path):
+    src = led.add_source(str(paper))
+    led.cite(src["id"], 2, "Site calibration 0.70", ["0.70"])
+    with pytest.raises(Refusal, match="outside the ledger"):
+        led.anchor(str(led.root / "anchor.jsonl"))
+    a = tmp_path / "anchor.jsonl"
+    led.anchor(str(a))
+    assert led.verify(str(a))["ok"]
+    lines = led.chain.read_text().splitlines()
+    led.chain.write_text(lines[0] + "\n")
+    assert led.verify()["ok"]  # the chain alone cannot tell
+    assert any("entries removed" in p for p in led.verify(str(a))["problems"])
