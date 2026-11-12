@@ -34,6 +34,7 @@ from pathlib import Path
 
 from . import critique as cq
 from . import formal as fm
+from . import guard
 from . import instruments as ins
 from . import plans as pl
 from . import quotecheck as qc
@@ -154,6 +155,7 @@ class Ledger:
             except OSError as e:
                 raise Refusal(f"could not fetch {origin}", str(e)[:200], "check the URL, or download it and give the file")
         else:
+            guard.check(origin)
             path = Path(origin).expanduser()
             draft = next((e for e in reversed(self.entries()) if e["kind"] == "draft"
                           and Path(e["body"]["path"]).expanduser().resolve() == path.resolve()), None)
@@ -347,8 +349,9 @@ class Ledger:
         ran = {v["body"].get("launch") for v in seen.values() if v["kind"] == "run"}
         open_launches = [v["id"] for v in seen.values() if v["kind"] == "launch" and v["id"] not in ran]
         reps = [v for v in seen.values() if v["kind"] == "reproduction"]
+        warn = guard.licensed_status()
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
-                "problems": problems, "unread": unread, "open_findings": review["open_findings"],
+                "problems": problems, **({"warnings": [warn]} if warn else {}), "unread": unread, "open_findings": review["open_findings"],
                 "reproductions": {"reproduced": sum(r["body"]["verdict"] == "reproduced" for r in reps),
                                   "differs": [r["id"] for r in reps if r["body"]["verdict"] == "differs"]},
                 "open_launches": open_launches, "personas": review["personas"],

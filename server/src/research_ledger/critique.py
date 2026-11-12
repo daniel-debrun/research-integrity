@@ -100,6 +100,8 @@ def gate(entries, target: str) -> None:
 def record_draft(led, path: str, supersedes: str = "") -> dict:
     """Record a file's text as a draft version, the numbers in it that no citation's quote writes, and its wording
     to check (see `wording`)."""
+    from . import guard
+    guard.check(path)
     p = Path(path).expanduser()
     if not p.is_file():
         raise Refusal(f"no file at {path}", "a draft is a text file: an issue, a report, a plan, a paper")

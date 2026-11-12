@@ -34,6 +34,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import guard
 from .quotecheck import Refusal
 
 SKIP_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "env", "node_modules", "__pycache__", ".pytest_cache",
@@ -77,6 +78,8 @@ def collect(src: Path) -> list:
     for rel in sorted(set(listed)):
         parts = rel.split("/")
         if any(d in SKIP_DIRS for d in parts[:-1]) or any(fnmatch.fnmatch(parts[-1], g) for g in SKIP_FILES):
+            continue
+        if guard.why(src / rel):  # credentials, keys, licensed data: never copied into the ledger
             continue
         if (src / rel).is_file() and not (src / rel).is_symlink():
             keep.append(rel)

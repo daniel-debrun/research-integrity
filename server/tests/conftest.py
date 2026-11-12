@@ -34,3 +34,9 @@ def tiny_pdf(lines: list) -> bytes:
     out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
     out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     return out
+
+
+@pytest.fixture(autouse=True)
+def no_user_config(tmp_path, monkeypatch):
+    """Tests never read the user's own licensed-data list."""
+    monkeypatch.setenv("RESEARCH_LEDGER_LICENSED", str(tmp_path / "licensed_paths"))

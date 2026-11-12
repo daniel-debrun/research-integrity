@@ -138,8 +138,9 @@ def _hypotheses(items, old=()) -> list:
 
 def _holdout(paths) -> list:
     out = []
+    from . import guard
     for p in paths or []:
-        path = Path(p).expanduser().resolve()
+        path = guard.check(p)
         if not path.is_file():
             raise Refusal(f"no file at {p}", "a holdout is a file the work must not see until a look")
         out.append({"path": str(path), "sha256": _sha_file(path)})
