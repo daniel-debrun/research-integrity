@@ -40,6 +40,7 @@ from . import formal as fm
 from . import guard
 from . import instruments as ins
 from . import memory as mem
+from . import search as sr
 from . import plans as pl
 from . import quotecheck as qc
 from .quotecheck import Refusal
@@ -279,7 +280,7 @@ class Ledger:
         check run again on the stored pages, each claim's numbers in its quotes. A source whose file is still there
         is read again: its bytes must hash as recorded, and each citation's check runs on its pages read afresh, so
         page texts written by hand show up too. `unread` lists the sources that could not be (URLs, files gone)."""
-        problems, seen, prev, fresh, unread = [], {}, GENESIS, {}, []
+        problems, seen, prev, fresh, unread, changed, moved = [], {}, GENESIS, {}, [], {}, []
         for i, e in enumerate(self.entries()):
             where = f"entry {i} ({e.get('id', '?')})"
             if not {"seq", "id", "kind", "at", "body", "prev", "hash"} <= e.keys():
@@ -301,6 +302,10 @@ class Ledger:
                     if data is None:
                         unread.append(e["id"])
                     elif hashlib.sha256(data).hexdigest() != b["sha256"]:
+                        try:
+                            changed[e["id"]] = qc.forms_of(data, b["origin"])
+                        except Refusal:
+                            pass
                         raise Refusal("its file has changed since it was recorded", b["origin"])
                     else:
                         fresh[e["id"]] = qc.forms_of(data, b["origin"])
@@ -324,6 +329,8 @@ class Ledger:
                     if seen.get(b["source"], {}).get("kind") not in ("source", "draft"):
                         raise Refusal(f"cites {b['source']}, which is not an earlier source or draft")
                     qc.check(self.forms(b["source"]), b["page"], b["quote"], b["numbers"], *_how(b))
+                    if b["source"] in changed:
+                        moved.append(sr.relocate(e, changed[b["source"]]))
                     if b["source"] in fresh:
                         try:
                             qc.check(fresh[b["source"]], b["page"], b["quote"], b["numbers"], *_how(b))
@@ -358,7 +365,10 @@ class Ledger:
         warn = guard.licensed_status()
         return {"ok": not problems, "entries": len(seen), **counts, "head": prev if seen else GENESIS,
                 "problems": problems, **({"warnings": [warn]} if warn else {}),
-                "stale_facts": mem.stale_facts(self, list(seen.values())), "unread": unread, "open_findings": review["open_findings"],
+                "stale_facts": mem.stale_facts(self, list(seen.values())),
+                "changed_sources": {"citations": len(moved), "same": sum(m["state"] == "same" for m in moved),
+                                    "moved": [m for m in moved if m["state"] == "moved"],
+                                    "gone": [m for m in moved if m["state"] == "gone"]} if moved else {}, "unread": unread, "open_findings": review["open_findings"],
                 "reproductions": {"reproduced": sum(r["body"]["verdict"] == "reproduced" for r in reps),
                                   "differs": [r["id"] for r in reps if r["body"]["verdict"] == "differs"]},
                 "open_launches": open_launches, "personas": review["personas"],

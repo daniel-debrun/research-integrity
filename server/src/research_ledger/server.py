@@ -15,6 +15,7 @@ from mcp.types import ToolAnnotations
 from . import critique as cq
 from . import instruments as ins
 from . import memory as mem
+from . import search as sr
 from . import plans as pl
 from .ledger import Ledger
 from .quotecheck import Refusal
@@ -73,6 +74,13 @@ def build(root: str | os.PathLike | None = None) -> MCPServer:
                 raise Refusal(f"the source has no page {page}", f"its pages are 1..{len(form)}")
             return {"ok": True, "source": source, "page": page, "n_pages": len(form), "text": form[page - 1]}
         return _safe(go)
+
+    @server.tool(annotations=reads("Search the sources"))
+    def search_sources(query: str, k: int = 8, sources: list[str] | None = None) -> dict:
+        """Passages of the recorded sources ranked against a question (BM25 over words), each with its source,
+        page and the numbers it writes, to read and quote. It finds candidates and checks nothing: a passage enters
+        the ledger only through cite. Search before writing, and abstain where no passage states the number."""
+        return _safe(lambda: {"ok": True, **sr.search(ledger, query, k, tuple(sources or ()))})
 
     @server.tool(annotations=appends("Cite a passage"))
     def cite(source: str, page: int, quote: str, numbers: list[str | float] | None = None,
