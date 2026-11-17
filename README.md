@@ -33,7 +33,7 @@ tests, and a claim records how many trials stand behind it, so a best-of-forty c
 | `server/` (`research-ledger`) | An MCP server (stdio) over the ledger: `add_source`, `read_page`, `cite`, `claim`, `verify`, `list_entries`, and for instruments `register_instrument`, `run_instrument`, `run_acting_instrument`, `reproduce_run`, `cite_run`. Every tool is annotated; only `run_acting_instrument` and `look_holdout` are destructive. | Any MCP client that runs a local command |
 | `server/` memory and search | `record_fact`, `recall`, `decide`, `list_subjects`, `list_decisions`, `write_digest`, `check_report`, `search_sources`, `annotate_source`, `anchor_ledger`. | Any MCP client that runs a local command |
 | `skills/memory/` | Facts probed on recall, decisions on subjects, hand-back reports checked, passages found to quote. | Any Agent Skills client |
-| `hooks/hooks.json` | At session start, prints current decisions, recent reversals and facts that no longer hold. | Claude Code |
+| `hooks/hooks.json` | At session start, prints current decisions, recent reversals and facts that no longer hold. Before a file tool runs, asks you when it is given a credential path. | Claude Code |
 | `skills/plans/` | Decide before you look: seal the plan, tag every run, report the trial count, spend holdout looks deliberately. | Any Agent Skills client |
 | `skills/critique/` | How a review is recorded and answered, and how to report it: each finding with what you found when you checked. | Any Agent Skills client |
 | `agents/` | Five personas: `adversary` and `reviewer` (record critiques; can't edit, run shells or answer findings), `scout` (finds and cites sources), `replicator` (re-derives a number with its own code), `experimenter` (runs the planned measurements). | Claude Code |
@@ -203,6 +203,11 @@ refuses, by the path as given and as resolved, credentials and keys (`.netrc`, `
 secret or password, among others), other ledgers, and folders listed as licensed data in
 `~/.config/research-ledger/licensed_paths` (one per line, kept outside every project so it is never committed). While
 that list is empty, `verify` says so. A `field` key that names a secret is refused, so its value is never recorded.
+
+The same name rules cover the agent's own file tools. A `PreToolUse` hook asks you before Read, Edit, Write, Grep or
+Glob is given a credential path, so a secret doesn't enter the transcript on its way to being refused by the ledger.
+In `claude -p` the ask is a denial. The hook sees only the path. It doesn't cover Bash (`cat .env`) or a search over a
+parent folder, and it leaves licensed data alone, which the agent may read to work on.
 
 ## What the checks don't catch
 
