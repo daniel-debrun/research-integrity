@@ -69,17 +69,30 @@ def _rule(parts: tuple) -> str:
     return ""
 
 
-def why(path) -> str:
-    """The rule that refuses `path`, or '' when it may be read."""
+def _both(path) -> tuple:
     given = Path(os.path.abspath(Path(path).expanduser()))
     try:
-        real = given.resolve()
+        return given, given.resolve()
     except OSError:
-        real = given
-    for p in (given, real):
+        return given, given
+
+
+def credential(path) -> str:
+    """The rule that marks `path` as a credential or key, or ''. Licensed data is not a credential: the agent may
+    read it to work on it, but the ledger never records it."""
+    for p in _both(path):
         r = _rule(p.parts)
         if r:
             return r
+    return ""
+
+
+def why(path) -> str:
+    """The rule that refuses `path`, or '' when it may be read."""
+    given, real = _both(path)
+    r = credential(path)
+    if r:
+        return r
     for folder in licensed():
         if real == folder or folder in real.parents or given == folder or folder in given.parents:
             return f"licensed data ({folder})"
