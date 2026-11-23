@@ -1,7 +1,5 @@
 # research-integrity
 
-> `research-integrity` and `research-ledger` are placeholder names.
-
 When an AI agent writes "the paper reports 0.61", nothing usually checks that the paper does. This plugin makes
 that check mechanical. A quote is recorded only if it is on the page it cites and writes every number it is cited
 for, without cutting a longer number on the page ("0.6" from "0.61"). A claim is recorded only on recorded quotes,
