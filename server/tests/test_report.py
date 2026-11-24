@@ -55,15 +55,24 @@ def test_golden_unnamed_wording_is_uncheckable(world):
     assert out["0.1.3"]["state"] == "uncheckable"
 
 
+def _short(sha: str) -> str:
+    """The shortest prefix of 7 or more characters that reads as a commit: it needs a letter and a digit."""
+    for n in range(7, len(sha) + 1):
+        if any(c.isalpha() for c in sha[:n]) and any(c.isdigit() for c in sha[:n]):
+            return sha[:n]
+    return sha
+
+
 def test_paths_commits_and_tags(world):
+    short = _short(world["sha"])
     text = (f"I edited server/ledger.py:2 and server/ledger.py:9, added server/new_module.py, and committed "
-            f"{world['sha'][:7]} on tag v0.2.0. The ledger id draft:1a2b3c4d5e6f is not a commit; nor is 1234567. "
+            f"{short} on tag v0.2.0. The ledger id draft:1a2b3c4d5e6f is not a commit; nor is 1234567. "
             f"See https://example.com/a/b.py and branch feature-x.")
     out = check(world, text)
     assert out["server/ledger.py:2"]["state"] == "confirmed"
     assert out["server/ledger.py:9"]["state"] == "contradicted"
     assert out["server/new_module.py"]["state"] == "missing"
-    assert out[world["sha"][:7]]["state"] == "confirmed"
+    assert out[short]["state"] == "confirmed"
     assert out["v0.2.0"]["state"] == "confirmed" and out["feature-x"]["state"] == "missing"
     assert "1a2b3c4d5e6f" not in out and "1234567" not in out
     said = check(world, "The changelog points to server/gone.py, which is missing.")
